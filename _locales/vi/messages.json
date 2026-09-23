@@ -1,0 +1,28 @@
+{
+  "appName": {
+    "message": "Trợ thủ Cờ vua AI",
+    "description": "Extension name"
+  },
+  "appDescription": {
+    "message": "Chơi cờ với Gemini, ChatGPT, Claude, Grok, Perplexity và Copilot từ side panel. Không backend, 100% cục bộ.",
+    "description": "Extension description"
+  },
+  "yourMove": {
+    "message": "Lượt của bạn",
+    "description": "Status your move"
+  },
+  "waitingAi": {
+    "message": "Đang chờ $PLATFORM$ trả lời…",
+    "description": "Waiting for AI",
+    "placeholders": {
+      "platform": {
+        "content": "$1",
+        "example": "ChatGPT"
+      }
+    }
+  },
+  "noAi": {
+    "message": "Không phát hiện tab AI",
+    "description": "No AI tab"
+  }
+}

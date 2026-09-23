@@ -1,9 +1,17 @@
 /**
- * Game session: position, move history, turn ownership and persistence.
+ * Game session: position, move history, turn ownership and persistence — v2.
  *
  * This is the model layer of the side panel. It contains no DOM access, which
  * keeps the turn/retry/undo rules unit-testable and lets the view stay a thin
  * renderer.
+ *
+ * v0.2.0 changes:
+ * - Snapshot version 2 with finalFen and migration from v0.1.0
+ * - Replay viewer: jump to ply, forward/back, start/end, current move highlight
+ * - Play from any position, retry from here
+ * - FEN setup with validation
+ * - Move classification and analysis support (heuristic)
+ * - Corrupt records handling
  *
  * @module ui/game
  */
@@ -15,9 +23,10 @@ import { Position } from "../core/position.js";
 import { toName } from "../core/squares.js";
 import { formatPgn, parsePgn, toSan } from "../core/pgn.js";
 import { formatMoveList } from "../shared/prompt.js";
+import { evaluate, classifyMove } from "../core/eval.js";
 
 /** Snapshot format version, bumped when the persisted shape changes. */
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
 
 /** Where a move came from. */
 export const MoveSource = Object.freeze({
@@ -32,6 +41,7 @@ export const MoveError = Object.freeze({
   NOT_YOUR_TURN: "not-your-turn",
   NOT_AI_TURN: "not-ai-turn",
   ILLEGAL: "illegal",
+  INVALID_FEN: "invalid-fen",
 });
 
 /**
@@ -46,6 +56,10 @@ export const MoveError = Object.freeze({
  * @property {string} fenAfter
  * @property {boolean} check
  * @property {boolean} mate
+ * @property {string} [comment] PGN comment
+ * @property {number} [evalBefore] eval before move (white perspective)
+ * @property {number} [evalAfter] eval after move
+ * @property {'brilliant'|'good'|'inaccuracy'|'mistake'|'blunder'|''} [classification]
  */
 
 /**
@@ -70,6 +84,8 @@ export class GameSession {
   #retryCount = 0;
   /** @type {Set<string>} */
   #rejectedMoves = new Set();
+  #currentPly = 0; // for replay viewer, 0 = start, history.length = latest
+  #positionAtPly = []; // cached positions for replay
 
   /**
    * @param {object} [options]
@@ -81,6 +97,8 @@ export class GameSession {
     this.#initialFen = initialFen;
     this.#position = Position.fromFen(initialFen);
     this.#waitingForAi = this.#position.turn !== this.#playerColor;
+    this.#currentPly = 0;
+    this.#positionAtPly = [this.#position.clone()];
   }
 
   /** @returns {string} current FEN. */
@@ -168,6 +186,27 @@ export class GameSession {
     return this.#position;
   }
 
+  /** @returns {number} current ply for replay viewer (0 = start) */
+  get currentPly() {
+    return this.#currentPly;
+  }
+
+  /** @returns {boolean} can go back */
+  get canGoBack() {
+    return this.#currentPly > 0;
+  }
+
+  /** @returns {boolean} can go forward */
+  get canGoForward() {
+    return this.#currentPly < this.#history.length;
+  }
+
+  /** @returns {MoveEntry|null} move at current replay position */
+  get currentMove() {
+    if (this.#currentPly === 0) return null;
+    return this.#history[this.#currentPly - 1] || null;
+  }
+
   /**
    * @param {number} square
    * @returns {string[]} algebraic names of the legal destinations.
@@ -198,6 +237,10 @@ export class GameSession {
     if (!this.isPlayerTurn) {
       return failure(MoveError.NOT_YOUR_TURN, "Wait for the AI to answer before making another move.");
     }
+    // If replay viewer is not at end, truncate future moves (play from here)
+    if (this.#currentPly < this.#history.length) {
+      this.#truncateToPly(this.#currentPly);
+    }
     return this.#play(uci, MoveSource.HUMAN);
   }
 
@@ -213,6 +256,9 @@ export class GameSession {
     }
     if (this.isPlayerTurn) {
       return failure(MoveError.NOT_AI_TURN, "The AI replied out of turn; the move was ignored.");
+    }
+    if (this.#currentPly < this.#history.length) {
+      this.#truncateToPly(this.#currentPly);
     }
     return this.#play(uci, MoveSource.AI);
   }
@@ -230,6 +276,10 @@ export class GameSession {
     }
     if (this.isPlayerTurn) {
       return failure(MoveError.NOT_AI_TURN, "The AI replied out of turn; the move was ignored.");
+    }
+
+    if (this.#currentPly < this.#history.length) {
+      this.#truncateToPly(this.#currentPly);
     }
 
     let lastFailure = failure(MoveError.ILLEGAL, "The AI did not send a usable move.");
@@ -276,9 +326,11 @@ export class GameSession {
     while (this.#history.length > 0 && (plies === 0 || !this.isPlayerTurn)) {
       this.#position.unmakeMove();
       this.#history.pop();
+      this.#positionAtPly.pop();
       plies += 1;
     }
 
+    this.#currentPly = this.#history.length;
     this.#waitingForAi = false;
     this.#retryCount = 0;
     this.#rejectedMoves.clear();
@@ -297,9 +349,34 @@ export class GameSession {
     this.#initialFen = initialFen;
     this.#position = Position.fromFen(initialFen);
     this.#history = [];
+    this.#positionAtPly = [this.#position.clone()];
+    this.#currentPly = 0;
     this.#waitingForAi = this.#position.turn !== this.#playerColor;
     this.#retryCount = 0;
     this.#rejectedMoves.clear();
+  }
+
+  /**
+   * Sets up a position from FEN, with validation.
+   *
+   * @param {string} fen
+   * @returns {{ok:boolean, error:string}}
+   */
+  setFen(fen) {
+    try {
+      const pos = Position.fromFen(fen);
+      this.#initialFen = pos.toFen();
+      this.#position = pos;
+      this.#history = [];
+      this.#positionAtPly = [this.#position.clone()];
+      this.#currentPly = 0;
+      this.#waitingForAi = this.#position.turn !== this.#playerColor;
+      this.#retryCount = 0;
+      this.#rejectedMoves.clear();
+      return { ok: true, error: "" };
+    } catch (error) {
+      return { ok: false, error: error.message || "Invalid FEN." };
+    }
   }
 
   /**
@@ -317,10 +394,12 @@ export class GameSession {
     this.#initialFen = parsed.game.initialFen;
     this.#position = Position.fromFen(this.#initialFen);
     this.#history = [];
+    this.#positionAtPly = [this.#position.clone()];
     for (const move of parsed.moves) {
       const san = toSan(this.#position, move);
       this.#applyMove(move, san, MoveSource.IMPORT);
     }
+    this.#currentPly = this.#history.length;
     this.#waitingForAi = this.#position.turn !== this.#playerColor;
     this.#retryCount = 0;
     this.#rejectedMoves.clear();
@@ -345,13 +424,13 @@ export class GameSession {
   /** @returns {string} the move list rendered as `1. e4 e5 2. Nf3`. */
   get moveListText() {
     return formatMoveList(this.#history, {
-      startMoveNumber: Number.parseInt(this.#initialFen.split(/\s+/)[5] || "1", 10) || 1,
-      blackToMoveFirst: (this.#initialFen.split(/\s+/)[1] || "w") === "b",
+      startMoveNumber: Number.parseInt(this.#initialFen.split(/\\s+/)[5] || "1", 10) || 1,
+      blackToMoveFirst: (this.#initialFen.split(/\\s+/)[1] || "w") === "b",
     });
   }
 
   /**
-   * @returns {object} a JSON-safe snapshot for `chrome.storage.local`.
+   * @returns {object} a JSON-safe snapshot for `chrome.storage.local` — v2.
    */
   snapshot() {
     return {
@@ -360,12 +439,14 @@ export class GameSession {
       playerColor: this.#playerColor,
       moves: this.#history.map((entry) => entry.uci),
       result: this.result,
+      finalFen: this.fen,
+      currentPly: this.#currentPly,
     };
   }
 
   /**
    * Rebuilds a session from {@link GameSession#snapshot}. Corrupt snapshots
-   * degrade to a fresh game instead of throwing.
+   * degrade to a fresh game instead of throwing. Supports migration from v1.
    *
    * @param {unknown} snapshot
    * @param {object} [options]
@@ -374,8 +455,17 @@ export class GameSession {
    */
   static fromSnapshot(snapshot, { playerColor = Color.WHITE } = {}) {
     const data = typeof snapshot === "object" && snapshot !== null ? snapshot : null;
-    if (!data || data.version !== SNAPSHOT_VERSION || !Array.isArray(data.moves)) {
+    if (!data || !Array.isArray(data.moves)) {
       return new GameSession({ playerColor });
+    }
+
+    // Migration: v1 had version 1, v2 has version 2, but also handle missing version
+    const version = data.version;
+    if (version !== 1 && version !== 2) {
+      // Try to recover as v1 if it has initialFen and moves
+      if (!data.initialFen) {
+        return new GameSession({ playerColor });
+      }
     }
 
     let session;
@@ -390,10 +480,30 @@ export class GameSession {
 
     for (const uci of data.moves) {
       if (typeof uci !== "string" || !session.playAnyMove(uci)) {
-        session.reset({ playerColor: session.playerColor });
+        // Corrupt move — discard rest but keep valid prefix (v0.2.0 improvement)
+        // Instead of resetting whole game, keep prefix
         break;
       }
     }
+
+    // Restore currentPly if present (v2)
+    if (typeof data.currentPly === "number" && data.currentPly >= 0 && data.currentPly <= session.#history.length) {
+      session.#currentPly = data.currentPly;
+      // Rebuild position to that ply
+      try {
+        const pos = Position.fromFen(session.#initialFen);
+        for (let i = 0; i < session.#currentPly; i += 1) {
+          const move = pos.moveFromUci(session.#history[i].uci);
+          if (move) pos.makeMove(move, { validate: false });
+        }
+        session.#position = pos;
+      } catch {
+        session.#currentPly = session.#history.length;
+      }
+    } else {
+      session.#currentPly = session.#history.length;
+    }
+
     return session;
   }
 
@@ -420,6 +530,181 @@ export class GameSession {
     return true;
   }
 
+  // --- Replay viewer ---
+
+  /**
+   * Jumps to a specific ply (0 = start).
+   *
+   * @param {number} ply
+   * @returns {boolean}
+   */
+  jumpToPly(ply) {
+    if (ply < 0 || ply > this.#history.length) return false;
+    if (ply === this.#currentPly) return true;
+
+    // Rebuild from initial
+    try {
+      const pos = Position.fromFen(this.#initialFen);
+      for (let i = 0; i < ply; i += 1) {
+        const move = pos.moveFromUci(this.#history[i].uci);
+        if (!move) return false;
+        pos.makeMove(move, { validate: false });
+      }
+      this.#position = pos;
+      this.#currentPly = ply;
+      this.#waitingForAi = this.#position.turn !== this.#playerColor;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** @returns {boolean} */
+  goToStart() {
+    return this.jumpToPly(0);
+  }
+
+  /** @returns {boolean} */
+  goToEnd() {
+    return this.jumpToPly(this.#history.length);
+  }
+
+  /** @returns {boolean} */
+  goBack() {
+    if (!this.canGoBack) return false;
+    return this.jumpToPly(this.#currentPly - 1);
+  }
+
+  /** @returns {boolean} */
+  goForward() {
+    if (!this.canGoForward) return false;
+    return this.jumpToPly(this.#currentPly + 1);
+  }
+
+  /**
+   * Truncates history to ply (for play from here).
+   *
+   * @param {number} ply
+   */
+  #truncateToPly(ply) {
+    if (ply < 0 || ply > this.#history.length) return;
+    this.#history = this.#history.slice(0, ply);
+    this.#positionAtPly = this.#positionAtPly.slice(0, ply + 1);
+    // Rebuild position to ply
+    try {
+      const pos = Position.fromFen(this.#initialFen);
+      for (let i = 0; i < ply; i += 1) {
+        const move = pos.moveFromUci(this.#history[i].uci);
+        if (move) pos.makeMove(move, { validate: false });
+      }
+      this.#position = pos;
+      this.#currentPly = ply;
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Plays from any position — resets to current replay position as new initial.
+   *
+   * @returns {{ok:boolean, error:string}}
+   */
+  playFromHere() {
+    if (this.#currentPly === this.#history.length) {
+      return { ok: true, error: "" };
+    }
+    const newInitial = this.#position.toFen();
+    // Keep history up to current ply as new game
+    this.#initialFen = newInitial;
+    this.#history = [];
+    this.#positionAtPly = [this.#position.clone()];
+    this.#currentPly = 0;
+    this.#waitingForAi = this.#position.turn !== this.#playerColor;
+    return { ok: true, error: "" };
+  }
+
+  /**
+   * Retries from current replay position — truncates future moves.
+   *
+   * @returns {{ok:boolean, error:string}}
+   */
+  retryFromHere() {
+    this.#truncateToPly(this.#currentPly);
+    return { ok: true, error: "" };
+  }
+
+  /**
+   * Analyses the game, producing accuracy and biggest swings.
+   * Heuristic only.
+   *
+   * @returns {{accuracy:{white:number, black:number}, swings:Array, classifications:Map}}
+   */
+  analyseGame() {
+    const classifications = [];
+    let whiteTotal = 0;
+    let whiteCount = 0;
+    let blackTotal = 0;
+    let blackCount = 0;
+    const swings = [];
+
+    try {
+      const pos = Position.fromFen(this.#initialFen);
+      let prevEval = evaluate(pos);
+
+      for (let i = 0; i < this.#history.length; i += 1) {
+        const entry = this.#history[i];
+        const move = pos.moveFromUci(entry.uci);
+        if (!move) break;
+
+        const before = pos.turn === "w" ? prevEval : -prevEval;
+        pos.makeMove(move, { validate: false });
+        const afterEval = evaluate(pos);
+        const after = pos.turn === "w" ? -afterEval : afterEval; // from mover perspective
+
+        const classification = classifyMove(before, after);
+        const swing = after - before;
+
+        classifications.push({ ply: i + 1, uci: entry.uci, san: entry.san, classification, swing, color: entry.color });
+
+        // Track accuracy (simplified: good moves = high accuracy)
+        const accuracy =
+          classification === "blunder"
+            ? 0
+            : classification === "mistake"
+              ? 30
+              : classification === "inaccuracy"
+                ? 70
+                : 100;
+        if (entry.color === "w") {
+          whiteTotal += accuracy;
+          whiteCount += 1;
+        } else {
+          blackTotal += accuracy;
+          blackCount += 1;
+        }
+
+        if (Math.abs(swing) > 150) {
+          swings.push({ ply: i + 1, san: entry.san, swing, classification });
+        }
+
+        prevEval = afterEval;
+      }
+
+      swings.sort((a, b) => Math.abs(b.swing) - Math.abs(a.swing));
+
+      return {
+        accuracy: {
+          white: whiteCount > 0 ? Math.round(whiteTotal / whiteCount) : 0,
+          black: blackCount > 0 ? Math.round(blackTotal / blackCount) : 0,
+        },
+        swings: swings.slice(0, 5),
+        classifications,
+      };
+    } catch {
+      return { accuracy: { white: 0, black: 0 }, swings: [], classifications: [] };
+    }
+  }
+
   /**
    * @param {string} uci
    * @param {'human'|'ai'} source
@@ -438,6 +723,7 @@ export class GameSession {
 
     const san = toSan(this.#position, move);
     const entry = this.#applyMove(move, san, source);
+    this.#currentPly = this.#history.length;
     this.#waitingForAi = source === MoveSource.HUMAN && this.#position.turn !== this.#playerColor;
     if (source === MoveSource.AI) {
       this.#retryCount = 0;
@@ -452,7 +738,13 @@ export class GameSession {
    * @returns {MoveEntry}
    */
   #applyMove(move, san, source) {
+    const beforeEval = evaluate(this.#position);
     this.#position.makeMove(move, { validate: false });
+    const afterEval = evaluate(this.#position);
+    const beforeFromMover = this.#position.turn === Color.WHITE ? -beforeEval : beforeEval;
+    const afterFromMover = this.#position.turn === Color.WHITE ? -afterEval : afterEval;
+    const classification = classifyMove(beforeFromMover, afterFromMover);
+
     /** @type {MoveEntry} */
     const entry = {
       uci: toUci(move),
@@ -465,8 +757,12 @@ export class GameSession {
       fenAfter: this.#position.toFen(),
       check: this.#position.isCheck(),
       mate: this.#position.isCheckmate(),
+      evalBefore: beforeEval,
+      evalAfter: afterEval,
+      classification,
     };
     this.#history.push(entry);
+    this.#positionAtPly.push(this.#position.clone());
     return entry;
   }
 }

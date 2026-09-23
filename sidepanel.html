@@ -4,32 +4,112 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI Chess Companion</title>
+    <script>
+      // Theme flash fix — apply stored theme before first paint using localStorage cache
+      (function () {
+        try {
+          var cached = localStorage.getItem("ai-chess-companion-theme-cache");
+          if (cached) {
+            var data = JSON.parse(cached);
+            if (data.theme) {
+              document.documentElement.setAttribute("data-theme-preload", data.theme);
+            }
+          }
+          // Also check system preference for initial flash reduction
+          var theme = cached ? JSON.parse(cached).theme : null;
+          var effective = theme;
+          if (!effective || effective === "system") {
+            effective = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          }
+          document.documentElement.style.background = effective === "light" ? "#eef1f6" : "#0e1218";
+        } catch (e) {}
+      })();
+    </script>
     <link rel="stylesheet" href="src/ui/theme.css" />
   </head>
-  <body data-theme="dark">
+  <body
+    data-theme="dark"
+    data-board-theme="classic"
+    data-font-scale="medium"
+    data-density="comfortable"
+    class="theme-loading"
+  >
+    <script>
+      // Apply cached theme immediately to body to prevent flash
+      (function () {
+        try {
+          var cached = localStorage.getItem("ai-chess-companion-theme-cache");
+          var theme = "dark";
+          var boardTheme = "classic";
+          var fontScale = "medium";
+          var density = "comfortable";
+          if (cached) {
+            var data = JSON.parse(cached);
+            if (data.theme) theme = data.theme;
+            if (data.boardTheme) boardTheme = data.boardTheme;
+            if (data.fontScale) fontScale = data.fontScale;
+            if (data.density) density = data.density;
+          }
+          // Resolve system
+          var resolvedTheme = theme;
+          if (theme === "system") {
+            resolvedTheme = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          }
+          document.body.setAttribute("data-theme", resolvedTheme);
+          document.body.setAttribute("data-board-theme", boardTheme);
+          document.body.setAttribute("data-font-scale", fontScale);
+          document.body.setAttribute("data-density", density);
+          document.body.classList.remove("theme-loading");
+          document.documentElement.style.background = "";
+        } catch (e) {
+          document.body.classList.remove("theme-loading");
+        }
+      })();
+    </script>
+
     <main class="panel">
       <header class="panel-header">
         <div class="panel-title">
-          <p class="eyebrow">Chess against your AI</p>
-          <h1>AI Chess Companion</h1>
+          <p class="eyebrow" id="app-eyebrow">Chess against your AI</p>
+          <h1 id="app-title">AI Chess Companion</h1>
         </div>
         <span class="panel-mark" aria-hidden="true">&#9822;</span>
       </header>
 
       <section class="board-area" aria-label="Chess board">
         <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+        <div id="eval-bar" class="eval-bar" hidden>
+          <div id="eval-fill" class="eval-fill" style="width: 50%"></div>
+        </div>
+        <p id="eval-text" class="eval-text" hidden></p>
       </section>
+
+      <div id="clock" class="clock" hidden>
+        <div class="clock-side" id="clock-white">
+          <div class="clock-label" id="clock-white-label">White</div>
+          <div class="clock-time" id="clock-white-time">05:00</div>
+        </div>
+        <div class="clock-side" id="clock-black">
+          <div class="clock-label" id="clock-black-label">Black</div>
+          <div class="clock-time" id="clock-black-time">05:00</div>
+        </div>
+      </div>
 
       <p id="status" class="status" role="status" aria-live="polite" data-kind="info">Starting up…</p>
       <button id="status-action" class="status-action" type="button" hidden></button>
 
+      <div class="controls">
+        <button id="copy-prompt" type="button" class="button" hidden>Copy prompt</button>
+        <button id="reload-tab" type="button" class="button" hidden>Reload tab</button>
+      </div>
+
       <dl class="meta">
         <div class="meta-row">
-          <dt>Turn</dt>
+          <dt id="turn-label">Turn</dt>
           <dd id="turn">White to move</dd>
         </div>
         <div class="meta-row">
-          <dt>Opponent</dt>
+          <dt id="opponent-label">Opponent</dt>
           <dd id="opponent">No AI chat open</dd>
         </div>
       </dl>
@@ -39,12 +119,14 @@
         <button id="new-game" type="button" class="button">New game</button>
         <button id="flip" type="button" class="button" title="Flip the board">Flip</button>
         <button id="ask-ai" type="button" class="button button-primary" hidden>Ask the AI to move</button>
+        <button id="hint" type="button" class="button">Hint</button>
+        <button id="analyse-game" type="button" class="button">Analyse</button>
       </div>
 
       <details id="connections" class="panel-section">
-        <summary>AI chat connections</summary>
+        <summary id="connections-title">AI chat connections</summary>
         <div class="section-body">
-          <p class="hint">
+          <p class="hint" id="connections-hint">
             Prompts are typed into the AI chat you already have open. Nothing leaves your browser otherwise.
           </p>
           <div class="row">
@@ -56,24 +138,112 @@
       </details>
 
       <details id="history-section" class="panel-section" open>
-        <summary>Moves</summary>
+        <summary id="moves-title">Moves</summary>
         <div class="section-body">
           <p id="moves-empty" class="hint">No moves yet. Play a white piece to start.</p>
           <ol id="moves" class="history"></ol>
           <div class="row">
             <button id="copy-pgn" type="button" class="button">Copy PGN</button>
             <button id="open-pgn" type="button" class="button">PGN…</button>
+            <button id="replay-start" type="button" class="button" title="Jump to start">⏮</button>
+            <button id="replay-back" type="button" class="button" title="Previous move">◀</button>
+            <button id="replay-forward" type="button" class="button" title="Next move">▶</button>
+            <button id="replay-end" type="button" class="button" title="Jump to end">⏭</button>
           </div>
         </div>
       </details>
 
-      <details class="panel-section">
-        <summary>Position</summary>
+      <details id="library-section" class="panel-section">
+        <summary id="library-title">Game library</summary>
+        <div class="section-body">
+          <p id="library-empty" class="hint">No saved games yet.</p>
+          <div class="row">
+            <input id="library-search" type="search" class="select" placeholder="Search games" />
+          </div>
+          <div id="library-list" class="library-list"></div>
+          <div class="row">
+            <button id="library-import" type="button" class="button">Import PGN</button>
+            <button id="library-export-all" type="button" class="button">Export all</button>
+            <button id="library-new" type="button" class="button">New game</button>
+          </div>
+        </div>
+      </details>
+
+      <details id="analysis-section" class="panel-section">
+        <summary id="analysis-title">Analysis</summary>
+        <div class="section-body">
+          <p class="hint" id="analysis-hint">Local engine — heuristic evaluation, not perfect.</p>
+          <div id="analysis-report" class="analysis-report"></div>
+          <div class="row">
+            <label for="engine-level" id="engine-level-label">Strength</label>
+            <select id="engine-level" class="select">
+              <option value="1">1 — Beginner</option>
+              <option value="2">2 — Easy</option>
+              <option value="3">3 — Casual</option>
+              <option value="4" selected>4 — Intermediate</option>
+              <option value="5">5 — Advanced</option>
+              <option value="6">6 — Strong</option>
+              <option value="7">7 — Expert</option>
+              <option value="8">8 — Master</option>
+            </select>
+          </div>
+          <div class="row">
+            <button id="play-vs-engine" type="button" class="button">Play vs engine</button>
+            <button id="stop-engine" type="button" class="button" hidden>Stop</button>
+          </div>
+          <p class="hint" id="analysis-heuristic-note">
+            This judgement is a heuristic estimate, not a perfect calculation.
+          </p>
+        </div>
+      </details>
+
+      <details class="panel-section" id="position-section">
+        <summary id="position-title">Position</summary>
         <div class="section-body">
           <code id="fen" class="fen" aria-label="Current FEN"></code>
           <div class="row">
             <button id="copy-fen" type="button" class="button">Copy FEN</button>
+            <button id="paste-fen" type="button" class="button">Paste FEN</button>
+            <button id="copy-position" type="button" class="button">Copy position</button>
             <button id="open-settings" type="button" class="button">Settings</button>
+          </div>
+          <p id="fen-status" class="hint" role="status" aria-live="polite"></p>
+        </div>
+      </details>
+
+      <details id="diagnostics-section" class="panel-section">
+        <summary id="diagnostics-title">Diagnostics</summary>
+        <div class="section-body">
+          <dl class="meta">
+            <div class="meta-row">
+              <dt>Platform</dt>
+              <dd id="diag-platform">—</dd>
+            </div>
+            <div class="meta-row">
+              <dt>Composer</dt>
+              <dd id="diag-composer">—</dd>
+            </div>
+            <div class="meta-row">
+              <dt>Send button</dt>
+              <dd id="diag-send">—</dd>
+            </div>
+            <div class="meta-row">
+              <dt>Assistant</dt>
+              <dd id="diag-assistant">—</dd>
+            </div>
+            <div class="meta-row">
+              <dt>Timings</dt>
+              <dd id="diag-timings">—</dd>
+            </div>
+            <div class="meta-row">
+              <dt>Last error</dt>
+              <dd id="diag-error">—</dd>
+            </div>
+          </dl>
+          <pre id="diagnostics-report" class="diagnostics" hidden></pre>
+          <div class="row">
+            <button id="copy-diagnostics" type="button" class="button">Copy report</button>
+            <button id="toggle-diagnostics" type="button" class="button">Show details</button>
           </div>
         </div>
       </details>
@@ -93,17 +263,63 @@
     <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
       <h2 id="settings-title" class="dialog-title">Settings</h2>
       <label class="field" for="settings-side">
-        <span>Play as</span>
+        <span id="settings-play-as-label">Play as</span>
         <select id="settings-side" class="select">
           <option value="w">White (moves first)</option>
           <option value="b">Black (the AI opens)</option>
         </select>
       </label>
       <label class="field" for="settings-theme">
-        <span>Theme</span>
+        <span id="settings-theme-label">Theme</span>
         <select id="settings-theme" class="select">
           <option value="dark">Dark</option>
           <option value="light">Light</option>
+          <option value="system">System</option>
+        </select>
+      </label>
+      <label class="field" for="settings-locale">
+        <span id="settings-locale-label">Language</span>
+        <select id="settings-locale" class="select">
+          <option value="en">English</option>
+          <option value="vi">Tiếng Việt</option>
+          <option value="system">System</option>
+        </select>
+      </label>
+      <label class="field" for="settings-board-theme">
+        <span id="settings-board-theme-label">Board theme</span>
+        <select id="settings-board-theme" class="select">
+          <option value="classic">Classic</option>
+          <option value="blue">Blue</option>
+          <option value="green">Green</option>
+          <option value="high-contrast">High contrast</option>
+        </select>
+      </label>
+      <label class="field" for="settings-font-scale">
+        <span id="settings-font-scale-label">Font scale</span>
+        <select id="settings-font-scale" class="select">
+          <option value="small">Small</option>
+          <option value="medium">Medium</option>
+          <option value="large">Large</option>
+        </select>
+      </label>
+      <label class="field" for="settings-density">
+        <span id="settings-density-label">Density</span>
+        <select id="settings-density" class="select">
+          <option value="comfortable">Comfortable</option>
+          <option value="compact">Compact</option>
+        </select>
+      </label>
+      <label class="field" for="settings-engine-level">
+        <span>Engine level</span>
+        <select id="settings-engine-level" class="select">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4" selected>4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+          <option value="8">8</option>
         </select>
       </label>
       <div class="field-group">
@@ -124,17 +340,28 @@
         <label class="checkbox"
           ><input type="checkbox" data-setting="persistGame" /><span>Remember the game between sessions</span></label
         >
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="soundEnabled" /><span>Play sounds (move, capture, check)</span></label
+        >
+        <label class="checkbox"><input type="checkbox" data-setting="clockEnabled" /><span>Show clocks</span></label>
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="animationsEnabled" /><span>Animate moves</span></label
+        >
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="evalBarEnabled" /><span>Show evaluation bar</span></label
+        >
       </div>
       <p class="hint">Settings are stored locally with <code>chrome.storage.local</code>. Nothing is uploaded.</p>
-      <form method="dialog" class="dialog-actions">
-        <button type="submit" class="button button-primary">Done</button>
-      </form>
+      <div class="dialog-actions">
+        <button id="settings-reset" type="button" class="button">Reset to defaults</button>
+        <form method="dialog"><button type="submit" class="button button-primary">Done</button></form>
+      </div>
     </dialog>
 
     <dialog id="pgn-dialog" class="dialog" aria-labelledby="pgn-title">
       <h2 id="pgn-title" class="dialog-title">Game PGN</h2>
       <label class="visually-hidden" for="pgn-text">PGN text</label>
-      <textarea id="pgn-text" class="textarea" spellcheck="false" rows="10"></textarea>
+      <textarea id="pgn-text" class="textarea" spellcheck="false" rows="10" placeholder="Paste PGN here…"></textarea>
       <p id="pgn-status" class="hint" role="status" aria-live="polite"></p>
       <div class="dialog-actions">
         <button id="pgn-copy" type="button" class="button">Copy</button>
@@ -142,6 +369,78 @@
         <form method="dialog"><button type="submit" class="button">Close</button></form>
       </div>
     </dialog>
+
+    <dialog id="fen-dialog" class="dialog" aria-labelledby="fen-dialog-title">
+      <h2 id="fen-dialog-title" class="dialog-title">Set up position (FEN)</h2>
+      <label class="visually-hidden" for="fen-input">FEN text</label>
+      <textarea
+        id="fen-input"
+        class="textarea"
+        spellcheck="false"
+        rows="3"
+        placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+      ></textarea>
+      <p id="fen-dialog-status" class="hint" role="status" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button id="fen-apply" type="button" class="button button-primary">Apply</button>
+        <form method="dialog"><button type="submit" class="button">Close</button></form>
+      </div>
+    </dialog>
+
+    <dialog id="shortcuts-dialog" class="dialog" aria-labelledby="shortcuts-title">
+      <h2 id="shortcuts-title" class="dialog-title">Keyboard shortcuts</h2>
+      <dl class="meta">
+        <div class="meta-row">
+          <dt>New game</dt>
+          <dd>N</dd>
+        </div>
+        <div class="meta-row">
+          <dt>Undo</dt>
+          <dd>U</dd>
+        </div>
+        <div class="meta-row">
+          <dt>Flip board</dt>
+          <dd>F</dd>
+        </div>
+        <div class="meta-row">
+          <dt>Copy PGN</dt>
+          <dd>C</dd>
+        </div>
+        <div class="meta-row">
+          <dt>Focus board</dt>
+          <dd>B</dd>
+        </div>
+        <div class="meta-row">
+          <dt>Hint</dt>
+          <dd>H</dd>
+        </div>
+        <div class="meta-row">
+          <dt>Help</dt>
+          <dd>?</dd>
+        </div>
+        <div class="meta-row">
+          <dt>Close dialog</dt>
+          <dd>Escape</dd>
+        </div>
+      </dl>
+      <form method="dialog" class="dialog-actions">
+        <button type="submit" class="button button-primary">Close</button>
+      </form>
+    </dialog>
+
+    <dialog id="library-rename-dialog" class="dialog" aria-labelledby="library-rename-title">
+      <h2 id="library-rename-title" class="dialog-title">Rename game</h2>
+      <label class="field" for="library-rename-input">
+        <span>Title</span>
+        <input id="library-rename-input" class="select" type="text" maxlength="200" />
+      </label>
+      <div class="dialog-actions">
+        <button id="library-rename-save" type="button" class="button button-primary">Save</button>
+        <form method="dialog"><button type="submit" class="button">Cancel</button></form>
+      </div>
+    </dialog>
+
+    <div id="announcements" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 
     <script type="module" src="src/ui/main.js"></script>
   </body>

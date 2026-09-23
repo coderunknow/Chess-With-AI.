@@ -1,0 +1,28 @@
+{
+  "appName": {
+    "message": "AI Chess Companion",
+    "description": "Extension name"
+  },
+  "appDescription": {
+    "message": "Play chess against Gemini, ChatGPT, Claude, Grok, Perplexity and Copilot from the side panel. No backend, 100% local.",
+    "description": "Extension description"
+  },
+  "yourMove": {
+    "message": "Your move",
+    "description": "Status your move"
+  },
+  "waitingAi": {
+    "message": "Waiting for $PLATFORM$ to answer…",
+    "description": "Waiting for AI",
+    "placeholders": {
+      "platform": {
+        "content": "$1",
+        "example": "ChatGPT"
+      }
+    }
+  },
+  "noAi": {
+    "message": "No AI chat detected",
+    "description": "No AI tab"
+  }
+}

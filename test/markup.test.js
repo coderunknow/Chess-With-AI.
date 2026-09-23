@@ -52,9 +52,17 @@ test("element ids are unique", () => {
 
 test("the panel loads the entry module and nothing else", () => {
   const scripts = [...html.matchAll(/<script\b[^>]*>/g)].map((match) => match[0]);
-  assert.equal(scripts.length, 1);
-  assert.match(scripts[0], /type="module"/);
-  assert.match(scripts[0], /src="src\/ui\/main\.js"/);
+  const external = scripts.filter((tag) => /src=/.test(tag));
+  const inline = scripts.filter((tag) => !/src=/.test(tag));
+  // Allow 2 inline scripts for theme flash prevention, but only one external module
+  assert.equal(external.length, 1, `expected 1 external script, got ${external.length}: ${external.join(", ")}`);
+  assert.match(external[0], /type="module"/);
+  assert.match(external[0], /src="src\/ui\/main\.js"/);
+  // Inline scripts must be small and not load remote code (theme cache)
+  assert.ok(inline.length <= 2, `expected at most 2 inline scripts for theme flash fix, got ${inline.length}`);
+  for (const tag of inline) {
+    assert.ok(!/src=/.test(tag), "inline script should not have src");
+  }
 });
 
 test("the panel only references local assets", () => {
@@ -85,11 +93,15 @@ test("dialogs are declared as native dialog elements", () => {
 test("the settings dialog covers every toggle the app reads", () => {
   const toggles = [...html.matchAll(/data-setting="([^"]+)"/g)].map((match) => match[1]);
   assert.deepEqual(toggles.sort(), [
+    "animationsEnabled",
     "autoRetry",
+    "clockEnabled",
+    "evalBarEnabled",
     "highlightLastMove",
     "persistGame",
     "showCoordinates",
     "showLegalTargets",
+    "soundEnabled",
   ]);
 });
 

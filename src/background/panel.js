@@ -1,10 +1,11 @@
 /**
- * Side-panel lifecycle and active-tab tracking.
+ * Side-panel lifecycle and active-tab tracking — v2 with badge turn/check sync.
  *
  * The panel is available on every page (so the board, history and PGN tools can
  * always be opened) while the content script only ever runs on supported AI
  * hosts. The active tab is reported to the panel so it knows where to send
- * prompts; the toolbar badge shows when a usable AI chat is in front.
+ * prompts; the toolbar badge shows when a usable AI chat is in front and now
+ * reflects turn/check.
  *
  * @module background/panel
  */
@@ -20,6 +21,13 @@ export const SIDE_PANEL_PATH = "sidepanel.html";
 /** Badge shown while a supported AI chat is the active tab. */
 const BADGE_SUPPORTED = "AI";
 const BADGE_COLOR = "#2f7d5a";
+const BADGE_COLOR_WHITE = "#4a90d9";
+const BADGE_COLOR_BLACK = "#2f2f2f";
+const BADGE_COLOR_CHECK = "#d32f2f";
+
+/** @type {{tabId:number|null, url:string, platform:string, supported:boolean, turn?:string, check?:boolean, over?:boolean}} */
+let lastDescription = null;
+let lastGameState = null;
 
 /**
  * Applies the panel behaviour. Safe to call repeatedly; every failure is logged
@@ -71,19 +79,52 @@ export async function getActiveTab() {
 }
 
 /**
- * Updates the toolbar badge for the given tab description.
+ * Updates the toolbar badge for the given tab description and optional game state.
+ *
+ * Badge logic v2:
+ * - No supported tab: empty
+ * - Supported, no game or game over: "AI"
+ * - Supported, game in progress: "W" white to move, "B" black to move, "!" if check (red)
  *
  * @param {ReturnType<typeof describeTab>|null} description
+ * @param {{turn?:string, check?:boolean, over?:boolean, plyCount?:number}|null} gameState
  */
-export async function updateBadge(description) {
+export async function updateBadge(description, gameState = null) {
+  lastDescription = description;
+  if (gameState) {
+    lastGameState = gameState;
+  }
+
   try {
-    await chrome.action.setBadgeText({ text: description?.supported ? BADGE_SUPPORTED : "" });
-    if (description?.supported) {
-      await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
-      await chrome.action.setTitle({ title: `AI Chess Companion — connected to ${description.platform}` });
+    if (!description?.supported) {
+      await chrome.action.setBadgeText({ text: "" });
+      await chrome.action.setTitle({ title: "AI Chess Companion — open an AI chat tab to play" });
       return;
     }
-    await chrome.action.setTitle({ title: "AI Chess Companion — open an AI chat tab to play" });
+
+    let badgeText = BADGE_SUPPORTED;
+    let badgeColor = BADGE_COLOR;
+    let title = `AI Chess Companion — connected to ${description.platform}`;
+
+    if (gameState && !gameState.over && gameState.plyCount > 0) {
+      if (gameState.check) {
+        badgeText = "!";
+        badgeColor = BADGE_COLOR_CHECK;
+        title = `AI Chess Companion — ${gameState.turn === "w" ? "White" : "Black"} is in check on ${description.platform}`;
+      } else if (gameState.turn === "w") {
+        badgeText = "W";
+        badgeColor = BADGE_COLOR_WHITE;
+        title = `AI Chess Companion — White to move on ${description.platform}`;
+      } else if (gameState.turn === "b") {
+        badgeText = "B";
+        badgeColor = BADGE_COLOR_BLACK;
+        title = `AI Chess Companion — Black to move on ${description.platform}`;
+      }
+    }
+
+    await chrome.action.setBadgeText({ text: badgeText });
+    await chrome.action.setBadgeBackgroundColor({ color: badgeColor });
+    await chrome.action.setTitle({ title });
   } catch (error) {
     log.debug("badge update skipped", error);
   }
@@ -120,7 +161,7 @@ export function trackActiveTab({ debounceMs = 150 } = {}) {
     if (description?.tabId !== null) {
       lastTabId = description.tabId;
     }
-    await Promise.all([updateBadge(description), broadcastActiveTab(description)]);
+    await Promise.all([updateBadge(description, lastGameState), broadcastActiveTab(description)]);
   };
 
   const schedule = (tabId = null) => {
@@ -148,12 +189,24 @@ export function trackActiveTab({ debounceMs = 150 } = {}) {
   chrome.tabs.onRemoved.addListener(onRemoved);
   chrome.windows?.onFocusChanged?.addListener(() => schedule(null));
 
+  // Listen for game state updates from side panel
+  const onMessage = (message) => {
+    if (message?.type === "GAME_STATE_CHANGED" && message.gameState) {
+      lastGameState = message.gameState;
+      if (lastDescription) {
+        void updateBadge(lastDescription, lastGameState);
+      }
+    }
+  };
+  chrome.runtime.onMessage.addListener(onMessage);
+
   return () => {
     globalThis.clearTimeout(timer);
     chrome.tabs.onActivated.removeListener(onActivated);
     chrome.tabs.onUpdated.removeListener(onUpdated);
     chrome.tabs.onRemoved.removeListener(onRemoved);
     chrome.windows?.onFocusChanged?.removeListener(() => schedule(null));
+    chrome.runtime.onMessage.removeListener(onMessage);
   };
 }
 

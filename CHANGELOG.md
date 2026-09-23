@@ -5,6 +5,55 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-23
+
+### Added
+
+- **Board interaction v2**: pointer-events drag & drop with ghost piece, hover preview, 180ms animation respecting `prefers-reduced-motion`, flip, coordinates toggle, hint arrow SVG, WebAudio sounds off by default, copy/paste FEN with validation, copy position (FEN+PGN)
+- **Game library**: `chrome.storage.local` LRU 50 with quota-aware fallback, list/open/rename/duplicate/delete with undo (10s), import/export PGN file/clipboard/textarea, search, autosave debounced, schema v2 migration (finalFen, currentPly) tested, corrupt prefix kept
+- **i18n en/vi**: ESM dictionaries `src/shared/i18n.js` with `t()` interpolation/pluralisation, `chrome.i18n.getUILanguage()` live switch via settings, `_locales/` JSON, test fails on divergence or bypass
+- **Themes v2**: light/dark/system with no flash (inline head script reads `localStorage ai-chess-companion-theme-cache`), board themes classic/blue/green/high-contrast AAA, font scale small/medium/large, density comfortable/compact persisted, shortcuts via `chrome.commands` and `?` help dialog
+- **AI-host bridge v2**: platform registry ordered candidates per role with strategy, typing that verifies read-back, submit with confirmation and no double, response extraction handling figurine unicode/0-0/e8=Q+/annotations, streaming settle 800ms + periodic scan, plan reply detection with stricter retry bounded backoff 500ms/1s/2s, recovery bounded, degraded clipboard fallback (copy prompt button), diagnostics section (platform, matched selectors, timings, copy report)
+- **Local engine**: iterative deepening alpha-beta quiescence Zobrist TT 256k MVV-LVA killer/history, Worker cancellable (`search-worker.js` protocol search/info/result/cancelled/error/ready), Hint arrow, eval bar (white perspective %), classification blunder/mistake/inaccuracy/good/brilliant (heuristic labelled), analyse game accuracy report (white/black % + biggest swings), play vs engine levels 1-8 (depth 1-7, deliberate weakness low levels)
+- **Clock**: optional white/black clocks with start/stop/tick 250ms, format mm:ss, flag detection
+- **Diagnostics UI**: section with platform/composer/send/assistant/timings/error/report/copy/toggle details
+- **Eval bar & analysis UI**: eval-bar, accuracy bars, move classification colors
+- **Library UI**: search, import/export/new, actions open/rename/duplicate/delete/export
+- **FEN & shortcuts dialogs**: paste FEN with status, help dialog with keyboard shortcuts
+- **A11y v2**: focus trap/restore in dialogs, promotion keyboard/Escape, move list auto-scroll to current/replay cursor, announcements live region, status line actionable (RELOAD_TAB, COPY_PROMPT, UNDO_DELETE), badge+title turn/check sync (W/B/!/AI colors), no color-only, axe-core 0 violations both themes/locales
+- **Narrow viewport**: 280-900px overflow fixes, long PGN/FEN wrapping, responsive grid
+
+### Changed
+
+- Snapshot version 2 with finalFen/currentPly, migration v1→v2, corrupt handling keeps valid prefix
+- History view with replay viewer jumpToPly/goToStart/goToEnd/goBack/goForward, currentPly, active ply highlighting, comment/classification display
+- Status model with RELOAD_TAB/COPY_PROMPT/UNDO_DELETE actions, diagnostics-aware, i18n tr param
+- Board view with drag & drop, hover, ghost, hint arrow, animation
+- Theme.css v2 with board themes, eval/library/diagnostics/clock styles, narrow fixes
+- Background panel with badge turn/check sync (W white blue, B black dark, ! check red, AI default green) and GAME_STATE_CHANGED handling
+
+### Fixed
+
+- P0 theme flash before paint fixed via inline head script and localStorage cache
+- First-run dead end: status offers OPEN_AI action, platform banner hint, copy prompt fallback
+- Board drag & drop, hover, check highlighting, touch via pointer events
+- Promotion keyboard/Escape/focus restore
+- Move list auto-scroll to replay cursor
+- Focus/dialogs trap/restore
+- Dark mode contrast AAA for high-contrast board theme
+- Async double-fire guard (busy flag) and rollback
+- Destructive undo with 10s undo
+- Empty/error states designed for library, moves, diagnostics
+- Long content wrapping for PGN/FEN
+- Status line actionable with degraded clipboard fallback
+- Badge+title turn/check sync
+
+### Security
+
+- No innerHTML/eval/new Function/document.write/inline handlers; all rendering via textContent
+- Treat AI output/PGN/clipboard/storage as untrusted, sanitised
+- No new permissions (allow_commands only), no network beyond user's typing into AI page
+
 ## [0.1.0] - 2026-09-23
 
 First public release. A ground-up rewrite of the initial prototype: the chess engine, the AI bridge and the side
