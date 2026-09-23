@@ -1,0 +1,6 @@
+# Default owners for everything
+* @coderunknow
+
+# Docs
+/docs/ @coderunknow
+*.md @coderunknow
