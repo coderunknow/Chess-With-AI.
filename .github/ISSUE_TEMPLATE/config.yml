@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "💬 Ask a Question"
+    url: "https://github.com/coderunknow/Chess-With-AI/discussions"
+    about: "Ask questions, share ideas, get help"
+  - name: "🔒 Report a Security Issue"
+    url: "mailto:accicloudnha@gmail.com"
+    about: "Please email security issues privately, don't open a public issue"
+  - name: "📖 Read the Docs"
+    url: "https://github.com/coderunknow/Chess-With-AI/blob/main/README.md"
+    about: "Check README, SUPPORT, and PRIVACY docs first"
