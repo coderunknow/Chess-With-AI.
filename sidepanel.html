@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Chess Companion</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101317;
+      --panel: #171c23;
+      --panel-raised: #202731;
+      --border: #303b49;
+      --text: #f3f6fa;
+      --muted: #a4afbe;
+      --accent: #71b7ff;
+      --light-square: #c8d9e8;
+      --dark-square: #477091;
+      --selected: #f4c95d;
+      --target: rgba(100, 220, 140, 0.74);
+      --capture: rgba(242, 107, 107, 0.84);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 280px;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main { padding: 16px; }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    h1 { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
+
+    .eyebrow {
+      margin: 0 0 2px;
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .board-wrap {
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      aspect-ratio: 1;
+      overflow: hidden;
+      border-radius: 6px;
+      user-select: none;
+    }
+
+    .square {
+      position: relative;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      color: #16202c;
+      cursor: pointer;
+      font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", serif;
+      font-size: clamp(26px, 11vw, 48px);
+      line-height: 1;
+      transition: filter 120ms ease, box-shadow 120ms ease;
+    }
+
+    .square.light { background: var(--light-square); }
+    .square.dark { background: var(--dark-square); }
+    .square:hover { filter: brightness(1.08); }
+    .square.selected { box-shadow: inset 0 0 0 4px var(--selected); }
+    .square.legal-target::after,
+    .square.capture-target::after {
+      position: absolute;
+      width: 25%;
+      height: 25%;
+      border-radius: 50%;
+      background: var(--target);
+      content: "";
+    }
+
+    .square.capture-target::after {
+      width: 72%;
+      height: 72%;
+      border: 4px solid var(--capture);
+      background: transparent;
+    }
+
+    .square.last-move { box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.33); }
+
+    .piece {
+      position: relative;
+      z-index: 1;
+      filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.4));
+    }
+
+    .white-piece { color: #fff; text-shadow: 0 1px 0 #263242, 0 0 2px #172131; }
+    .black-piece { color: #161d29; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.16); }
+
+    .status {
+      min-height: 40px;
+      margin: 12px 0;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--muted);
+    }
+
+    .status[data-kind="error"] { border-color: #9b4b56; color: #ffb7bd; }
+    .status[data-kind="success"] { border-color: #3b7b5b; color: #a8e8bf; }
+
+    .meta {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+    }
+
+    code.fen {
+      display: block;
+      overflow: hidden;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #0c0f13;
+      color: #cbd8e7;
+      font: 11px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    button#reset {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-raised);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 650;
+    }
+
+    button#reset:hover { border-color: var(--accent); background: #273342; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">Board assistant</p>
+        <h1>AI Chess Companion</h1>
+      </div>
+      <span aria-hidden="true">♞</span>
+    </header>
+
+    <section class="board-wrap" aria-label="Chess board">
+      <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+    </section>
+
+    <div id="status" class="status" role="status" aria-live="polite">Your turn. Select a white piece.</div>
+
+    <div class="meta">
+      <div class="meta-row"><span>Turn</span><strong id="turn">White</strong></div>
+      <div class="meta-row"><span>Last move</span><strong id="last-move">—</strong></div>
+      <code id="fen" class="fen" aria-label="Current FEN"></code>
+    </div>
+
+    <button id="reset" type="button">Reset game</button>
+    <p class="hint">Make a move while an AI chat tab is active. The position and UCI move are sent automatically.</p>
+  </main>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
