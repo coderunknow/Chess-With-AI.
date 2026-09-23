@@ -1,15 +1,21 @@
 <!doctype html>
 <html>
-  <head><title>ChatGPT fixture</title></head>
+  <head>
+    <title>ChatGPT fixture</title>
+  </head>
   <body>
     <div id="composer" data-testid="composer">
       <div contenteditable="true" role="textbox" aria-label="Message ChatGPT" id="prompt-textarea"></div>
       <button data-testid="send-button" aria-label="Send prompt">Send</button>
     </div>
     <div data-testid="conversation">
-      <article data-message-author-role="user">Chess move request. FEN: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1</article>
+      <article data-message-author-role="user">
+        Chess move request. FEN: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1
+      </article>
       <article data-message-author-role="assistant">Good move! I play [e7e5].</article>
-      <article data-message-author-role="assistant">Plan: control center, develop knights, castle kingside. No bracketed move here — should trigger retry.</article>
+      <article data-message-author-role="assistant">
+        Plan: control center, develop knights, castle kingside. No bracketed move here — should trigger retry.
+      </article>
     </div>
   </body>
 </html>

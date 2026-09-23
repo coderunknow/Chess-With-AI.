@@ -112,8 +112,10 @@ Two workflows live in `.github/workflows/`:
 - `ci.yml` runs on every push and pull request. It lints, format-checks, runs the tests, validates the manifest and
   the module graph, and uploads the packaged archive as a build artifact.
 - `release.yml` runs on `v*` tags. It repeats the full verification, refuses to publish when `manifest.json` does not
-  match the tag, builds `build/ai-chess-companion-<version>.zip` and attaches it to the GitHub release. Use
-  **Actions → Release → Run workflow** with an existing tag to rebuild a release without moving the tag.
+  match the tag, builds `build/ai-chess-companion-<version>.zip` and attaches it to the GitHub release. The upload
+  is retried three times, and any partial asset is removed first, because `uploads.github.com` occasionally closes
+  the connection (`EOF`). Use **Actions → Release → Run workflow** with an existing tag to rebuild a release
+  without moving the tag.
 
 ## Releasing
 

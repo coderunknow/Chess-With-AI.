@@ -64,6 +64,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          ARCHIVE="build/ai-chess-companion-${VERSION}.zip"
+          ASSET_NAME="ai-chess-companion-${VERSION}.zip"
+          if [ ! -f "${ARCHIVE}" ]; then
+            echo "::error::Expected archive ${ARCHIVE} was not produced"
+            exit 1
+          fi
+          SIZE="$(stat -c%s "${ARCHIVE}")"
+          # GitHub release assets must be non-empty and under 2 GiB.
+          if [ "${SIZE}" -le 0 ] || [ "${SIZE}" -ge 2147483648 ]; then
+            echo "::error::Archive ${ARCHIVE} is ${SIZE} bytes; refusing to upload"
+            exit 1
+          fi
+          echo "Archive ${ARCHIVE} is ${SIZE} bytes"
+
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "Release ${TAG} already exists — attaching the archive"
           else
@@ -72,7 +87,37 @@ jobs:
               --generate-notes \
               --verify-tag
           fi
-          gh release upload "${TAG}" "build/ai-chess-companion-${VERSION}.zip" --clobber
+
+          # --clobber replaces a finished asset, but a truncated upload (the
+          # uploads.github.com EOF) can leave a partial asset that the next
+          # POST then rejects. Drop it before each attempt.
+          remove_partial_asset() {
+            gh release delete-asset "${TAG}" "${ASSET_NAME}" --yes >/dev/null 2>&1 || true
+          }
+          remove_partial_asset
+
+          uploaded=0
+          for attempt in 1 2 3; do
+            echo "Upload attempt ${attempt}/3"
+            if gh release upload "${TAG}" "${ARCHIVE}" --clobber; then
+              uploaded=1
+              break
+            fi
+            echo "Upload attempt ${attempt} failed"
+            if [ "${attempt}" -lt 3 ]; then
+              sleep 5
+              remove_partial_asset
+            fi
+          done
+          if [ "${uploaded}" -ne 1 ]; then
+            echo "::error::Failed to upload ${ARCHIVE} after 3 attempts"
+            exit 1
+          fi
+          if ! gh release view "${TAG}" --json assets --jq '.assets[].name' | grep -qx "${ASSET_NAME}"; then
+            echo "::error::Release ${TAG} does not list ${ASSET_NAME} after upload"
+            exit 1
+          fi
+          echo "Attached ${ASSET_NAME} to ${TAG}"
 
       - name: Summarise
         run: |
