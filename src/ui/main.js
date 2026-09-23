@@ -64,7 +64,6 @@ const app = new App({
     status: byId("pgn-status"),
     copy: byId("pgn-copy"),
     load: byId("pgn-load"),
-    open: byId("open-pgn"),
   },
 });
 

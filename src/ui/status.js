@@ -73,7 +73,7 @@ export function describeStatus({ session, connection, phase, message = "", busy 
         StatusAction.OPEN_AI,
       );
     }
-    return status(`Waiting for ${connection.label} to answer…`, StatusKind.WAITING);
+    return status(`Waiting for ${connection.label} to answer…`, StatusKind.WAITING, StatusAction.ASK_AI);
   }
 
   if (session.isCheck) {

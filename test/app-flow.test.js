@@ -108,7 +108,6 @@ async function bootApp({ storage = {} } = {}) {
       status: elements["pgn-status"],
       copy: elements["pgn-copy"],
       load: elements["pgn-load"],
-      open: elements["open-pgn"],
     },
   });
 
@@ -497,6 +496,25 @@ test("the panel tolerates a missing content script by injecting it", async () =>
     await app.selectSquare(28);
 
     assert.ok(state.injectedFiles.includes("src/content/index.js"));
+  } finally {
+    env.teardown();
+  }
+});
+
+test("the status line offers a retry while the AI is thinking", async () => {
+  const env = await bootApp();
+  try {
+    const { app, refs } = env;
+    await app.selectSquare(12);
+    await app.selectSquare(28);
+
+    assert.match(refs.status.textContent, /Waiting for ChatGPT/);
+    assert.equal(refs["status-action"].dataset.action, "ask-ai");
+    assert.equal(refs["status-action"].hidden, false);
+
+    refs["status-action"].dispatch("click");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(env.prompts().length, 2, "the action re-sends the move request");
   } finally {
     env.teardown();
   }
