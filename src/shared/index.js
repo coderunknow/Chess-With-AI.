@@ -31,13 +31,19 @@ export {
   normaliseUci,
 } from "./prompt.js";
 export {
+  BOARD_THEMES,
   DEFAULT_SETTINGS,
+  DENSITIES,
+  FONT_SCALES,
+  LOCALES,
   MAX_RETRIES_LIMIT,
   PROMPT_STYLES,
   SETTINGS_KEY,
   THEMES,
   mergeSettings,
   normaliseSettings,
+  resolveLocale,
+  resolveTheme,
 } from "./settings.js";
 export { readValue, removeValue, writeValue } from "./storage.js";
 export {
@@ -46,11 +52,18 @@ export {
   HOST_PATTERNS,
   PLATFORMS,
   SUPPORTED_HOSTS,
+  assistantCandidatesForHost,
   assistantSelectorsForHost,
+  inputCandidatesForHost,
   inputSelectorsForHost,
   isSupportedUrl,
   platformForHost,
   platformForUrl,
+  sendCandidatesForHost,
   sendSelectorsForHost,
+  transcriptCandidatesForHost,
+  userCandidatesForHost,
   userSelectorsForHost,
 } from "./platforms.js";
+export { createEmptyReport, formatReport, DiagnosticsCollector } from "./diagnostics.js";
+export { availableLocales, checkDictionaries, createTranslator, getDictionary } from "./i18n.js";

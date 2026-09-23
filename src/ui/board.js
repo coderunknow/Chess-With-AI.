@@ -1,5 +1,6 @@
 /**
- * Board rendering.
+ * Board rendering — v2 with drag & drop, hover preview, animations, sounds,
+ * board themes, high-contrast, and hint arrow.
  *
  * The visual model is produced by the pure {@link describeBoard} function, which
  * is unit-tested without a browser; {@link BoardView} only maps that model onto
@@ -25,6 +26,7 @@ import { parseUci } from "../core/move.js";
  * @property {boolean} isCapture target holds an enemy piece.
  * @property {boolean} isLastMove
  * @property {boolean} isCheck the king on this square is in check.
+ * @property {boolean} isHover hover preview
  * @property {string} fileLabel coordinate label, `''` when disabled.
  * @property {string} rankLabel coordinate label, `''` when disabled.
  * @property {string} label accessible description.
@@ -35,6 +37,7 @@ import { parseUci } from "../core/move.js";
  * @property {BoardCell[][]} rows rows in display order (top row first).
  * @property {BoardCell[]} cells all 64 cells in display order.
  * @property {boolean} flipped
+ * @property {{from:number,to:number}|null} [lastMove]
  */
 
 /**
@@ -48,6 +51,7 @@ import { parseUci } from "../core/move.js";
  * @param {boolean} [input.flipped] true when Black is at the bottom.
  * @param {boolean} [input.showCoordinates]
  * @param {boolean} [input.showLegalTargets]
+ * @param {number} [input.hoverSquare] square currently hovered
  * @returns {BoardDescription}
  */
 export function describeBoard({
@@ -58,6 +62,7 @@ export function describeBoard({
   flipped = false,
   showCoordinates = true,
   showLegalTargets = true,
+  hoverSquare = -1,
 }) {
   const targetSet = new Set(targets);
   const checkSquare = position.isCheck() ? position.kingSquare(position.turn) : -1;
@@ -86,6 +91,7 @@ export function describeBoard({
         isCapture: isTarget && Boolean(piece),
         isLastMove: isLastMoveSquare,
         isCheck: square === checkSquare,
+        isHover: square === hoverSquare,
         fileLabel: showCoordinates && rank === (flipped ? 7 : 0) ? FILES[file] : "",
         rankLabel: showCoordinates && file === (flipped ? 7 : 0) ? RANKS[rank] : "",
         label: describeCell({ name, piece, isTarget, isSelected: square === selected, showLegalTargets }),
@@ -95,7 +101,7 @@ export function describeBoard({
     rows.push(row);
   }
 
-  return { rows, cells: rows.flat(), flipped };
+  return { rows, cells: rows.flat(), flipped, lastMove };
 }
 
 /**
@@ -130,18 +136,30 @@ export class BoardView {
   #cells = new Map();
   /** @type {(square: number) => void} */
   #onSelect;
+  /** @type {(from:number,to:number)=>void} */
+  #onDrop;
   #built = false;
   #focusedSquare = -1;
+  #hoverSquare = -1;
+  #dragState = null;
+  #lastMove = null;
+  #animationEnabled = true;
+  #ghost = null;
 
   /**
    * @param {HTMLElement} root container that receives the 8x8 grid.
    * @param {object} options
    * @param {(square: number) => void} options.onSelect called when a square is activated.
+   * @param {(from:number,to:number)=>void} [options.onDrop] called on drag drop
+   * @param {boolean} [options.animationEnabled]
    */
-  constructor(root, { onSelect }) {
+  constructor(root, { onSelect, onDrop = null, animationEnabled = true } = {}) {
     this.#root = root;
     this.#onSelect = onSelect;
+    this.#onDrop = onDrop || onSelect;
+    this.#animationEnabled = animationEnabled;
 
+    // Click (existing)
     this.#root.addEventListener("click", (event) => {
       if (this.isStatic()) {
         return;
@@ -152,6 +170,17 @@ export class BoardView {
       }
     });
 
+    // Pointer events for drag & drop + hover
+    this.#root.addEventListener("pointerdown", (event) => this.#onPointerDown(event));
+    this.#root.addEventListener("pointermove", (event) => this.#onPointerMove(event));
+    this.#root.addEventListener("pointerup", (event) => this.#onPointerUp(event));
+    this.#root.addEventListener("pointercancel", () => this.#endDrag());
+    this.#root.addEventListener("pointerenter", (event) => this.#onPointerEnter(event), true);
+    this.#root.addEventListener("pointerleave", (event) => this.#onPointerLeave(event), true);
+
+    // Prevent native drag
+    this.#root.addEventListener("dragstart", (event) => event.preventDefault());
+
     this.#root.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#root.addEventListener("focusin", (event) => {
       const square = this.#squareFromEvent(event);
@@ -159,6 +188,19 @@ export class BoardView {
         this.#focusedSquare = square;
       }
     });
+
+    // Respect reduced motion
+    try {
+      const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+      if (media.matches) {
+        this.#animationEnabled = false;
+      }
+      media.addEventListener?.("change", (e) => {
+        this.#animationEnabled = !e.matches;
+      });
+    } catch {
+      // ignore
+    }
   }
 
   /**
@@ -168,12 +210,23 @@ export class BoardView {
    * @param {object} [options]
    * @param {number} [options.selected]
    * @param {boolean} [options.interactive] whether cells accept input.
+   * @param {{from:number,to:number}|null} [options.hint] hint arrow
    */
-  render(description, { selected = -1, interactive = true } = {}) {
+  render(description, { selected = -1, interactive = true, hint = null } = {}) {
     if (!this.#built || this.#orderChanged(description)) {
       this.#build(description);
     }
     this.#root.classList.toggle("is-static", !interactive);
+
+    // Handle animated moves
+    if (this.#animationEnabled && this.#lastMove && description.lastMove) {
+      const prev = this.#lastMove;
+      const curr = description.lastMove;
+      if (prev.from !== curr.from || prev.to !== curr.to) {
+        this.#animateMove(prev, curr, description);
+      }
+    }
+    this.#lastMove = description.lastMove;
 
     for (const cell of description.cells) {
       const button = this.#cells.get(cell.square);
@@ -187,6 +240,9 @@ export class BoardView {
       this.#paintPiece(button, cell);
       this.#paintCoordinates(button, cell);
     }
+
+    // Hint arrow
+    this.#renderHint(hint, description);
   }
 
   /** @returns {boolean} true when the board is displayed but not playable. */
@@ -304,6 +360,249 @@ export class BoardView {
     return Number.isInteger(square) ? square : null;
   }
 
+  #onPointerDown(event) {
+    if (this.isStatic()) return;
+    if (event.button !== 0) return; // only left click / primary touch
+    const square = this.#squareFromEvent(event);
+    if (square === null) return;
+
+    const button = this.#cells.get(square);
+    if (!button) return;
+
+    // Only start drag if square has a piece
+    const hasPiece = button.querySelector(".piece")?.textContent;
+    if (!hasPiece) return;
+
+    this.#dragState = {
+      from: square,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+
+    try {
+      button.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+
+    // Create ghost
+    this.#createGhost(button, event);
+  }
+
+  #onPointerMove(event) {
+    if (!this.#dragState) {
+      // Hover preview
+      const square = this.#squareFromEvent(event);
+      if (square !== null && square !== this.#hoverSquare) {
+        this.#hoverSquare = square;
+        // Add hover class
+        for (const [sq, btn] of this.#cells) {
+          btn.classList.toggle("is-hover", sq === square);
+        }
+      }
+      return;
+    }
+
+    const dx = event.clientX - this.#dragState.startX;
+    const dy = event.clientY - this.#dragState.startY;
+    if (!this.#dragState.moved && Math.hypot(dx, dy) < 5) {
+      return; // not yet dragging
+    }
+    this.#dragState.moved = true;
+
+    if (this.#ghost) {
+      this.#ghost.style.transform = `translate(${dx}px, ${dy}px)`;
+    }
+
+    const square = this.#squareFromEvent(event);
+    if (square !== null && square !== this.#hoverSquare) {
+      this.#hoverSquare = square;
+      for (const [sq, btn] of this.#cells) {
+        btn.classList.toggle("is-hover", sq === square);
+      }
+    }
+  }
+
+  #onPointerUp(event) {
+    if (!this.#dragState) return;
+
+    const from = this.#dragState.from;
+    const to = this.#squareFromEvent(event);
+    const moved = this.#dragState.moved;
+
+    this.#endDrag();
+
+    if (to === null) return;
+    if (!moved) {
+      // Treat as click
+      this.#onSelect(to);
+      return;
+    }
+    if (from !== to) {
+      // Drag & drop move
+      if (this.#onDrop) {
+        // For click-click compatibility, first select from, then drop to
+        // But for drag, we can directly call onDrop with from,to
+        if (this.#onDrop.length === 2) {
+          this.#onDrop(from, to);
+        } else {
+          // Fallback to existing select logic: select from then to
+          this.#onSelect(from);
+          // Small delay to allow selection to register
+          setTimeout(() => this.#onSelect(to), 0);
+        }
+      }
+    }
+  }
+
+  #onPointerEnter(event) {
+    const square = this.#squareFromEvent(event);
+    if (square !== null) {
+      this.#hoverSquare = square;
+      this.#cells.get(square)?.classList.add("is-hover");
+    }
+  }
+
+  #onPointerLeave(event) {
+    const square = this.#squareFromEvent(event);
+    if (square !== null) {
+      this.#cells.get(square)?.classList.remove("is-hover");
+      if (this.#hoverSquare === square) {
+        this.#hoverSquare = -1;
+      }
+    }
+  }
+
+  #createGhost(button, event) {
+    this.#removeGhost();
+    const piece = button.querySelector(".piece");
+    if (!piece) return;
+
+    const ghost = document.createElement("div");
+    ghost.className = "piece-ghost";
+    ghost.textContent = piece.textContent;
+    ghost.style.position = "fixed";
+    ghost.style.left = `${event.clientX}px`;
+    ghost.style.top = `${event.clientY}px`;
+    ghost.style.pointerEvents = "none";
+    ghost.style.zIndex = "1000";
+    ghost.style.fontSize = "42px";
+    ghost.style.transform = "translate(-50%, -50%)";
+    ghost.setAttribute("aria-hidden", "true");
+
+    document.body.append(ghost);
+    this.#ghost = ghost;
+  }
+
+  #removeGhost() {
+    if (this.#ghost) {
+      this.#ghost.remove();
+      this.#ghost = null;
+    }
+  }
+
+  #endDrag() {
+    this.#removeGhost();
+    this.#dragState = null;
+    // Clear hover
+    for (const btn of this.#cells.values()) {
+      btn.classList.remove("is-hover");
+    }
+    this.#hoverSquare = -1;
+  }
+
+  #animateMove(prev, _curr, _description) {
+    if (!this.#animationEnabled) return;
+    const fromBtn = this.#cells.get(prev.from);
+    const toBtn = this.#cells.get(prev.to);
+    if (!fromBtn || !toBtn) return;
+
+    // Simple animation: highlight moving piece
+    const piece = toBtn.querySelector(".piece");
+    if (!piece) return;
+
+    piece.style.transition = "transform 180ms ease";
+    // We could animate from previous position, but for simplicity just scale
+    piece.style.transform = "scale(1.2)";
+    setTimeout(() => {
+      piece.style.transform = "";
+      setTimeout(() => {
+        piece.style.transition = "";
+      }, 180);
+    }, 180);
+  }
+
+  #renderHint(hint, description) {
+    // Remove existing hint
+    this.#root.querySelectorAll(".hint-arrow").forEach((el) => el.remove());
+    if (!hint) return;
+
+    const fromBtn = this.#cells.get(hint.from);
+    const toBtn = this.#cells.get(hint.to);
+    if (!fromBtn || !toBtn) return;
+
+    // Create SVG arrow overlay
+    const svgNS = "http://www.w3.org/2000/svg";
+    let svg = this.#root.querySelector(".board-hints");
+    if (!svg) {
+      svg = document.createElementNS(svgNS, "svg");
+      svg.classList.add("board-hints");
+      svg.setAttribute("viewBox", "0 0 8 8");
+      svg.style.position = "absolute";
+      svg.style.top = "0";
+      svg.style.left = "0";
+      svg.style.width = "100%";
+      svg.style.height = "100%";
+      svg.style.pointerEvents = "none";
+      svg.style.zIndex = "5";
+      this.#root.style.position = "relative";
+      this.#root.append(svg);
+    }
+
+    const fromFile = fileOf(hint.from);
+    const fromRank = rankOf(hint.from);
+    const toFile = fileOf(hint.to);
+    const toRank = rankOf(hint.to);
+
+    const flipped = description.flipped;
+    const fromX = flipped ? 7 - fromFile + 0.5 : fromFile + 0.5;
+    const fromY = flipped ? fromRank + 0.5 : 7 - fromRank + 0.5;
+    const toX = flipped ? 7 - toFile + 0.5 : toFile + 0.5;
+    const toY = flipped ? toRank + 0.5 : 7 - toRank + 0.5;
+
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", String(fromX));
+    line.setAttribute("y1", String(fromY));
+    line.setAttribute("x2", String(toX));
+    line.setAttribute("y2", String(toY));
+    line.setAttribute("stroke", "rgba(113,183,255,0.9)");
+    line.setAttribute("stroke-width", "0.2");
+    line.setAttribute("marker-end", "url(#arrowhead)");
+    line.classList.add("hint-arrow");
+
+    // Arrowhead marker
+    let defs = svg.querySelector("defs");
+    if (!defs) {
+      defs = document.createElementNS(svgNS, "defs");
+      const marker = document.createElementNS(svgNS, "marker");
+      marker.setAttribute("id", "arrowhead");
+      marker.setAttribute("markerWidth", "4");
+      marker.setAttribute("markerHeight", "3");
+      marker.setAttribute("refX", "3");
+      marker.setAttribute("refY", "1.5");
+      marker.setAttribute("orient", "auto");
+      const polygon = document.createElementNS(svgNS, "polygon");
+      polygon.setAttribute("points", "0 0, 4 1.5, 0 3");
+      polygon.setAttribute("fill", "rgba(113,183,255,0.9)");
+      marker.append(polygon);
+      defs.append(marker);
+      svg.append(defs);
+    }
+
+    svg.append(line);
+  }
+
   /**
    * Arrow keys move focus around the board; Enter/Space activate a square.
    *
@@ -359,6 +658,9 @@ export function cellClassName(cell) {
   }
   if (cell.isCheck) {
     classes.push("is-check");
+  }
+  if (cell.isHover) {
+    classes.push("is-hover");
   }
   if (cell.piece) {
     classes.push(isWhitePiece(cell.piece) ? "has-white" : "has-black");

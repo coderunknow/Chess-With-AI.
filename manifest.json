@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Chess Companion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Play chess against Gemini, ChatGPT, Claude, Grok, Perplexity and Copilot from the side panel. No backend, 100% local.",
   "minimum_chrome_version": "116",
   "icons": {

@@ -129,14 +129,15 @@ async function bootApp({ storage = {} } = {}) {
 test("the app starts idle with an empty board and a live connection", async () => {
   const env = await bootApp();
   try {
-    const { app, state } = env;
+    const { app } = env;
 
     assert.equal(app.session.plyCount, 0);
     assert.equal(app.session.playerColor, "w");
     assert.match(env.refs.status.textContent, /Your move/);
     assert.equal(env.refs["turn"].textContent, "White to move");
     assert.equal(env.refs["opponent"].textContent, "ChatGPT (Black)");
-    assert.equal(state.tabMessages.length, 0, "nothing is sent before the first move");
+    // v0.2.0: refreshConnection may ping for diagnostics, but no chess prompt is sent
+    assert.equal(env.prompts().length, 0, "no chess prompt is sent before the first move");
   } finally {
     env.teardown();
   }
@@ -468,7 +469,8 @@ test("status line offers an action when no AI tab is open", async () => {
     await app.selectSquare(12);
     await app.selectSquare(28);
 
-    assert.match(refs.status.textContent, /no AI chat is open/i);
+    // v0.2.0 text is "No AI chat detected..." — accept either old or new wording
+    assert.match(refs.status.textContent, /no AI chat (is open|detected)/i);
     assert.equal(refs["status-action"].dataset.action, "open-ai");
     assert.equal(app.session.plyCount, 1);
     assert.equal(env.prompts().length, 0, "nothing can be sent without an AI tab");

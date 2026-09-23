@@ -1,5 +1,5 @@
 /**
- * Watches the chat transcript for the AI's move.
+ * Watches the chat transcript for the AI's move — v2.
  *
  * Strategy: every DOM mutation nominates candidate message containers. Once the
  * page has been quiet for `settleMs` (streaming answers mutate continuously), or
@@ -8,12 +8,20 @@
  * filtered out, duplicates are suppressed, and the result is handed to the
  * callback.
  *
+ * v0.2.0 improvements:
+ * - Streaming settle: text must be stable for 800ms, not just DOM quiet
+ * - Handles markdown/code fences, figurine unicode, 0-0/O-O, e8=Q+, annotations
+ * - Detects "plan" replies with no move → notifies panel to retry stricter
+ * - Diagnostics: which selector matched, timings
+ * - Larger pending queue, periodic scan while awaiting
+ * - Sanitised fallback selectors
+ *
  * @module content/observer
  */
 
 import { extractMoveCandidates, isEchoOfPrompt } from "../shared/prompt.js";
 import { createLogger } from "../shared/log.js";
-import { isElement, isUserSideElement, textOf } from "./dom.js";
+import { isElement, isUserSideElement, normaliseReplyText, textOf } from "./dom.js";
 
 const log = createLogger("observer");
 
@@ -23,8 +31,11 @@ export const SETTLE_MS = 600;
 /** Upper bound on how long a scan may be postponed while the page keeps mutating. */
 export const MAX_WAIT_MS = 2500;
 
+/** How long text must be stable to be considered settled (streaming). */
+export const STABLE_MS = 800;
+
 /** Containers kept in the pending queue. */
-const MAX_PENDING_CONTAINERS = 8;
+export const MAX_PENDING_CONTAINERS = 16;
 
 /** Reported moves are remembered to avoid re-applying the same reply. */
 const DEDUPE_MS = 15000;
@@ -36,6 +47,7 @@ const FALLBACK_CONTAINER_SELECTORS = Object.freeze([
   "[data-testid*='message' i]",
   ".prose",
   "[class*='message' i]",
+  "[data-message-author-role='assistant']",
 ]);
 
 /**
@@ -43,6 +55,13 @@ const FALLBACK_CONTAINER_SELECTORS = Object.freeze([
  * @property {string} move newest bracketed move found.
  * @property {string[]} candidates all bracketed moves in the reply, newest first.
  * @property {string} text the scanned reply text.
+ * @property {boolean} [noMove] true when reply has no move (plan reply).
+ */
+
+/**
+ * @typedef {object} NoMoveEvent
+ * @property {string} text scanned text with no move
+ * @property {boolean} noMove true
  */
 
 export class MoveWatcher {
@@ -56,19 +75,36 @@ export class MoveWatcher {
   #sentPrompts = [];
   #settleTimer = 0;
   #maxWaitTimer = 0;
+  #stableTimer = 0;
+  #periodicTimer = 0;
+  #lastTexts = new Map();
+  /** @type {DiagnosticsCollector|null} */
+  #diagnostics = null;
+  #lastScanHadNoMove = false;
 
   /**
    * @param {object} options
-   * @param {(event: MoveEvent) => void} options.onMove
+   * @param {(event: MoveEvent|NoMoveEvent) => void} options.onMove
    * @param {() => string[]} [options.assistantSelectors]
+   * @param {() => Array<{selector:string,strategy:string}>} [options.assistantCandidates]
    * @param {number} [options.settleMs]
    * @param {number} [options.maxWaitMs]
+   * @param {DiagnosticsCollector} [options.diagnostics]
    */
-  constructor({ onMove, assistantSelectors = () => [], settleMs = SETTLE_MS, maxWaitMs = MAX_WAIT_MS }) {
+  constructor({
+    onMove,
+    assistantSelectors = () => [],
+    assistantCandidates = null,
+    settleMs = SETTLE_MS,
+    maxWaitMs = MAX_WAIT_MS,
+    diagnostics = null,
+  }) {
     this.onMove = onMove;
     this.getAssistantSelectors = assistantSelectors;
+    this.getAssistantCandidates = assistantCandidates;
     this.settleMs = settleMs;
     this.maxWaitMs = maxWaitMs;
+    this.#diagnostics = diagnostics;
   }
 
   /**
@@ -83,6 +119,17 @@ export class MoveWatcher {
     this.#observer = new MutationObserver((records) => this.#onMutations(records));
     this.#observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     log.debug("watching for AI replies");
+
+    // Periodic scan while awaiting (handles virtualized lists)
+    this.#periodicTimer = window.setInterval(() => {
+      if (this.#pending.size > 0) {
+        this.#scan();
+      }
+    }, 5000);
+
+    // Initial scan of existing DOM
+    this.#scanExisting();
+
     return true;
   }
 
@@ -93,8 +140,13 @@ export class MoveWatcher {
     this.#pending.clear();
     window.clearTimeout(this.#settleTimer);
     window.clearTimeout(this.#maxWaitTimer);
+    window.clearTimeout(this.#stableTimer);
+    window.clearInterval(this.#periodicTimer);
     this.#settleTimer = 0;
     this.#maxWaitTimer = 0;
+    this.#stableTimer = 0;
+    this.#periodicTimer = 0;
+    this.#lastTexts.clear();
   }
 
   /**
@@ -109,6 +161,29 @@ export class MoveWatcher {
     this.#sentPrompts.push(prompt);
     if (this.#sentPrompts.length > 5) {
       this.#sentPrompts.shift();
+    }
+  }
+
+  #scanExisting() {
+    try {
+      const selectors = this.getAssistantCandidates
+        ? this.getAssistantCandidates().map((c) => c.selector)
+        : this.getAssistantSelectors();
+      const all = [...selectors, ...FALLBACK_CONTAINER_SELECTORS];
+      for (const selector of all) {
+        try {
+          const elements = document.querySelectorAll(selector);
+          for (const el of elements) {
+            if (!isUserSideElement(el)) {
+              this.#pending.add(el);
+            }
+          }
+        } catch {
+          // ignore invalid
+        }
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -157,14 +232,29 @@ export class MoveWatcher {
    * @returns {Element|null} the assistant message container for `element`.
    */
   #resolveContainer(element) {
-    for (const selector of [...this.getAssistantSelectors(), ...FALLBACK_CONTAINER_SELECTORS]) {
+    const candidates = this.getAssistantCandidates
+      ? this.getAssistantCandidates()
+      : this.getAssistantSelectors().map((s) => ({ selector: s, strategy: "legacy" }));
+    const allSelectors = [...candidates.map((c) => c.selector || c), ...FALLBACK_CONTAINER_SELECTORS];
+
+    for (const selector of allSelectors) {
+      const sel = typeof selector === "string" ? selector : selector.selector;
       try {
-        const match = element.closest(selector);
+        const match = element.closest(sel);
         if (match && !isUserSideElement(match)) {
+          if (this.#diagnostics) {
+            this.#diagnostics.addAttempt("assistant", {
+              selector: sel,
+              strategy: "assistant",
+              matched: true,
+              timeMs: 0,
+            });
+            this.#diagnostics.report.matchedAssistant = sel;
+          }
           return match;
         }
       } catch (error) {
-        log.debug(`invalid assistant selector "${selector}"`, error);
+        log.debug(`invalid assistant selector "${sel}"`, error);
       }
     }
     return null;
@@ -172,7 +262,7 @@ export class MoveWatcher {
 
   #schedule() {
     window.clearTimeout(this.#settleTimer);
-    this.#settleTimer = window.setTimeout(() => this.#scan(), this.settleMs);
+    this.#settleTimer = window.setTimeout(() => this.#checkStabilityAndScan(), this.settleMs);
 
     if (this.#maxWaitTimer === 0) {
       this.#maxWaitTimer = window.setTimeout(() => {
@@ -182,23 +272,65 @@ export class MoveWatcher {
     }
   }
 
+  #checkStabilityAndScan() {
+    // Check if pending containers have stable text for STABLE_MS
+    let allStable = true;
+    for (const container of this.#pending) {
+      const currentText = textOf(container);
+      const last = this.#lastTexts.get(container);
+      if (!last || last.text !== currentText) {
+        this.#lastTexts.set(container, { text: currentText, timestamp: Date.now() });
+        allStable = false;
+      } else {
+        const age = Date.now() - last.timestamp;
+        if (age < STABLE_MS) {
+          allStable = false;
+        }
+      }
+    }
+
+    if (!allStable) {
+      // Reschedule stability check
+      window.clearTimeout(this.#stableTimer);
+      this.#stableTimer = window.setTimeout(() => this.#checkStabilityAndScan(), 200);
+      return;
+    }
+
+    this.#scan();
+  }
+
   #scan() {
     window.clearTimeout(this.#settleTimer);
     window.clearTimeout(this.#maxWaitTimer);
+    window.clearTimeout(this.#stableTimer);
     this.#settleTimer = 0;
     this.#maxWaitTimer = 0;
+    this.#stableTimer = 0;
 
     const containers = [...this.#pending];
     this.#pending.clear();
 
+    let foundNoMoveText = "";
+
     for (let index = containers.length - 1; index >= 0; index -= 1) {
-      const text = textOf(containers[index]);
-      if (!text || this.#isEcho(text)) {
+      const rawText = textOf(containers[index]);
+      if (!rawText) {
         continue;
       }
 
-      const candidates = extractMoveCandidates(text);
+      const normalized = normaliseReplyText(rawText);
+      if (this.#isEcho(normalized)) {
+        continue;
+      }
+
+      const candidates = extractMoveCandidates(normalized);
       if (candidates.length === 0) {
+        // Keep track of longest no-move text that looks like a plan reply
+        if (normalized.length > 50 && normalized.length < 20000) {
+          if (normalized.length > foundNoMoveText.length) {
+            foundNoMoveText = normalized;
+          }
+        }
         continue;
       }
 
@@ -208,8 +340,23 @@ export class MoveWatcher {
       }
 
       log.debug("detected AI move", move, candidates);
-      this.onMove({ move, candidates, text: text.slice(0, 400) });
+      this.#lastScanHadNoMove = false;
+      this.onMove({ move, candidates, text: normalized.slice(0, 400) });
       return;
+    }
+
+    // No move found but we have text that looks like a plan reply
+    if (foundNoMoveText && !this.#lastScanHadNoMove) {
+      // Only report no-move once per scan cycle to avoid spam
+      this.#lastScanHadNoMove = true;
+      const looksLikePlan =
+        /plan|strategy|think|consider|idea|move|should|would|could/i.test(foundNoMoveText) &&
+        foundNoMoveText.length > 100;
+
+      if (looksLikePlan) {
+        log.debug("detected plan reply with no move", foundNoMoveText.slice(0, 200));
+        this.onMove({ text: foundNoMoveText.slice(0, 1000), noMove: true });
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 /**
- * Side-panel bootstrap.
+ * Side-panel bootstrap — v0.2.0.
  *
  * Resolves every DOM reference used by {@link App} once, so that a mismatch
  * between `sidepanel.html` and the code fails loudly instead of silently
@@ -22,6 +22,14 @@ function byId(id) {
   return element;
 }
 
+/**
+ * @param {string} id
+ * @returns {HTMLElement|null}
+ */
+function byIdOptional(id) {
+  return document.getElementById(id);
+}
+
 const app = new App({
   board: byId("board"),
   status: byId("status"),
@@ -31,6 +39,16 @@ const app = new App({
   fen: byId("fen"),
   moveList: byId("moves"),
   moveListEmpty: byId("moves-empty"),
+  evalBar: byIdOptional("eval-bar"),
+  evalFill: byIdOptional("eval-fill"),
+  evalText: byIdOptional("eval-text"),
+  clock: {
+    root: byIdOptional("clock"),
+    white: byIdOptional("clock-white"),
+    black: byIdOptional("clock-black"),
+    whiteTime: byIdOptional("clock-white-time"),
+    blackTime: byIdOptional("clock-black-time"),
+  },
   controls: {
     undo: byId("undo"),
     newGame: byId("new-game"),
@@ -40,11 +58,49 @@ const app = new App({
     openPgn: byId("open-pgn"),
     copyFen: byId("copy-fen"),
     statusAction: byId("status-action"),
+    copyPrompt: byIdOptional("copy-prompt"),
+    reloadTab: byIdOptional("reload-tab"),
+    hint: byIdOptional("hint"),
+    analyseGame: byIdOptional("analyse-game"),
+    copyPosition: byIdOptional("copy-position"),
+    pasteFen: byIdOptional("paste-fen"),
+    playVsEngine: byIdOptional("play-vs-engine"),
+    stopEngine: byIdOptional("stop-engine"),
+    replayStart: byIdOptional("replay-start"),
+    replayBack: byIdOptional("replay-back"),
+    replayForward: byIdOptional("replay-forward"),
+    replayEnd: byIdOptional("replay-end"),
   },
   platformBanner: {
     root: byId("connections"),
     select: byId("platform-select"),
     open: byId("open-platform"),
+  },
+  library: {
+    root: byIdOptional("library-section"),
+    list: byIdOptional("library-list"),
+    empty: byIdOptional("library-empty"),
+    search: byIdOptional("library-search"),
+    import: byIdOptional("library-import"),
+    exportAll: byIdOptional("library-export-all"),
+    new: byIdOptional("library-new"),
+  },
+  analysis: {
+    root: byIdOptional("analysis-section"),
+    report: byIdOptional("analysis-report"),
+    level: byIdOptional("engine-level"),
+  },
+  diagnostics: {
+    root: byIdOptional("diagnostics-section"),
+    platform: byIdOptional("diag-platform"),
+    composer: byIdOptional("diag-composer"),
+    send: byIdOptional("diag-send"),
+    assistant: byIdOptional("diag-assistant"),
+    timings: byIdOptional("diag-timings"),
+    error: byIdOptional("diag-error"),
+    report: byIdOptional("diagnostics-report"),
+    copy: byIdOptional("copy-diagnostics"),
+    toggle: byIdOptional("toggle-diagnostics"),
   },
   promotionDialog: {
     root: /** @type {HTMLDialogElement} */ (byId("promotion-dialog")),
@@ -55,7 +111,13 @@ const app = new App({
     controls: {
       side: /** @type {HTMLSelectElement} */ (byId("settings-side")),
       theme: /** @type {HTMLSelectElement} */ (byId("settings-theme")),
+      locale: /** @type {HTMLSelectElement} */ (byIdOptional("settings-locale")),
+      boardTheme: /** @type {HTMLSelectElement} */ (byIdOptional("settings-board-theme")),
+      fontScale: /** @type {HTMLSelectElement} */ (byIdOptional("settings-font-scale")),
+      density: /** @type {HTMLSelectElement} */ (byIdOptional("settings-density")),
+      engineLevel: /** @type {HTMLSelectElement} */ (byIdOptional("settings-engine-level")),
       toggles: [...document.querySelectorAll("[data-setting]")],
+      reset: byIdOptional("settings-reset"),
     },
   },
   pgnDialog: {
@@ -65,10 +127,38 @@ const app = new App({
     copy: byId("pgn-copy"),
     load: byId("pgn-load"),
   },
+  fenDialog: {
+    root: /** @type {HTMLDialogElement} */ (byIdOptional("fen-dialog")),
+    input: /** @type {HTMLTextAreaElement} */ (byIdOptional("fen-input")),
+    status: byIdOptional("fen-dialog-status"),
+    apply: byIdOptional("fen-apply"),
+  },
+  shortcutsDialog: {
+    root: /** @type {HTMLDialogElement} */ (byIdOptional("shortcuts-dialog")),
+  },
+  libraryRenameDialog: {
+    root: /** @type {HTMLDialogElement} */ (byIdOptional("library-rename-dialog")),
+    input: /** @type {HTMLInputElement} */ (byIdOptional("library-rename-input")),
+    save: byIdOptional("library-rename-save"),
+  },
+  announcements: byIdOptional("announcements"),
+  fenStatus: byIdOptional("fen-status"),
 });
 
 document.getElementById("open-settings")?.addEventListener("click", () => {
   document.getElementById("settings-dialog")?.showModal();
+});
+
+// Keyboard shortcuts help: "?" key
+document.addEventListener("keydown", (event) => {
+  if (event.key === "?" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) {
+      return;
+    }
+    event.preventDefault();
+    document.getElementById("shortcuts-dialog")?.showModal();
+  }
 });
 
 // Handy when debugging the side panel from DevTools.

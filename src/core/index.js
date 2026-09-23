@@ -49,3 +49,6 @@ export {
 } from "./squares.js";
 export { KNIGHT_MOVES, KING_MOVES, isSquareAttacked, isSlidingPiece, pawnAttacks } from "./attacks.js";
 export { PGN_RESULT, formatPgn, moveFromSan, normaliseSanToken, parsePgn, pgnToUciMoves, toSan } from "./pgn.js";
+export { computeZobristKey, updateZobristKey } from "./zobrist.js";
+export { evaluate, formatEval, classifyMove, MATERIAL } from "./eval.js";
+export { Searcher, findBestMove, MATE_SCORE, INF } from "./search.js";
