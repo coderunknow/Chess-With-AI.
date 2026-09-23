@@ -1,160 +1,151 @@
 # AI Chess Companion ♞ — Chess With AI
 
-> Play chess alongside Gemini, ChatGPT, Claude, Grok, Perplexity, and Copilot — directly from your AI chat tab.
+> Play chess against Gemini, ChatGPT, Claude, Grok, Perplexity or Copilot — from Chrome's side panel.
 
-AI Chess Companion is a Chrome Extension (Manifest V3) that opens a beautiful chess board in the side panel while you chat with any major AI assistant. You play as White, the AI plays as Black. Your moves are automatically sent to the AI chat, and the AI's replies are parsed for UCI moves like `[e7e5]` to update the board.
+AI Chess Companion is a Manifest V3 Chrome extension that puts a full chess board next to your AI chat.
+You play one colour, the AI plays the other, and the extension does the bookkeeping:
 
-**No backend. No data collection. 100% local.**
+- it validates every move with a complete local chess engine (castling, en passant, promotion, pins, checks),
+- it types a structured prompt with the current FEN into the chat you already have open,
+- it reads the AI's reply, extracts the move, and updates the board if the move is legal.
+
+**No backend. No API keys. No telemetry. Everything runs locally.**
 
 ---
 
 ## ✨ Features
 
-- **Side Panel Chess Board** — Dark-themed, responsive board that lives alongside your AI chat
-- **Multi-AI Support**:
-  - Google Gemini
-  - ChatGPT (chatgpt.com & chat.openai.com)
-  - Claude.ai
-  - Grok.com
-  - Perplexity.ai
-  - Microsoft Copilot
-- **Automatic Prompting** — Converts your move + FEN to a structured prompt for the AI
-- **Smart Move Parsing** — Watches AI responses for bracketed UCI notation e.g. `[g8f6]`
-- **Full Chess Rules** — Legal move validation, castling, en passant, promotion, check detection
-- **Zero Permissions Creep** — Only `sidePanel`, `activeTab`, `scripting` + host permissions for supported AI sites
-- **Privacy First** — No analytics, no servers, no API keys
+- **Side panel board** — scales from a narrow panel to a wide pop-out, with keyboard navigation
+- **Six AI platforms** — Gemini, ChatGPT, Claude, Grok, Perplexity, Microsoft Copilot
+- **Complete chess rules** — legal move generation, castling, en passant, promotion (with a chooser), check/checkmate, stalemate, fifty-move rule, threefold repetition, insufficient material
+- **Plays both colours** — play White, or take Black and let the AI open
+- **Move list and PGN** — live move list, copy or load a full PGN, export with the final result
+- **Automatic recovery** — if the AI answers with an illegal move, the extension sends a corrected request (bounded, configurable)
+- **Resumable games** — the position survives a panel reload through `chrome.storage.local`
+- **Undo, flip, theme** — take back a move pair, flip the board, switch between dark and light themes
+- **Privacy first** — the only network traffic is the chat prompt you already send to your AI
 
-## 🧩 How It Works
+## 🧩 How it works
 
 ```
-[Side Panel]  --(UCI + FEN)-->  [Content Script]  --injects prompt-->  [AI Chat Input]
-     ^                                                                    |
-     |                                                                    v
-     +--(parses [e2e4])<----  MutationObserver on AI response  <---- [AI Response]
+┌────────────────────┐  SEND_CHESS_PROMPT   ┌──────────────────┐   types + submits   ┌──────────────┐
+│  Side panel (ESM)  │ ───────────────────▶ │  Content script  │ ──────────────────▶ │   AI chat    │
+│  engine + UI       │                      │  bridge/observer │                     │              │
+│                    │ ◀─────────────────── │                  │ ◀────────────────── │  AI reply    │
+└────────────────────┘        AI_MOVE       └──────────────────┘   MutationObserver  └──────────────┘
+        │                                              ▲
+        │ GET_ACTIVE_TAB                               │ dynamic import of the ESM graph
+        ▼                                              │
+┌────────────────────┐                    ┌────────────────────────────┐
+│ Service worker     │  side panel setup  │ web_accessible_resources   │
+│ badge + panel      │                    │ (validated by CI)          │
+└────────────────────┘                    └────────────────────────────┘
 ```
 
-1. **background.js** — Service worker that enables the side panel only on supported AI hosts and handles `openPanelOnActionClick`.
-2. **content.js** — Injected into AI chat pages. Finds the chat input (textarea/contenteditable), populates it, clicks send, and observes DOM mutations for AI moves in `[fromTo]` format.
-3. **sidepanel.html / sidepanel.js** — Full chess engine UI:
-   - Parses FEN, validates pseudo-legal and legal moves
-   - Checks for check, pins, castling rights
-   - Renders board with Unicode glyphs ♔♕♖♗♘♙
-   - Sends `SEND_CHESS_PROMPT` to content script
-   - Listens for `AI_MOVE` events
+1. **`src/core/`** — a dependency-free chess engine (position, move generation, SAN/PGN). It is pure ES modules and runs identically in Node and in the browser.
+2. **`src/shared/`** — the platform registry, message contract, prompt builder and settings. `src/shared/platforms.js` is the single source of truth for the hosts the extension supports.
+3. **`src/background/`** — panel behaviour, toolbar badge, and the "which tab should I talk to?" answer.
+4. **`src/content/`** — `index.js` is the classic bootstrap that dynamically imports the ESM graph; `bridge.js` drives each site's composer; `observer.js` watches the transcript for the AI's move.
+5. **`src/ui/`** — the side panel: `game.js` (session/turn/undo/retry model), `board.js` (render model + view), `history.js`, `status.js`, `app.js` (orchestration).
 
-UCI Format Expected: `[e2e4]`, `[g1f3]`, `[e7e8q]` for promotions.
+The prompt protocol is deliberately strict, so replies are easy to parse:
+
+```
+Chess move request. You are playing BLACK. The human plays White.
+Position (FEN): r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 2 3
+Moves so far: 1. e4 e5 2. Nf3 Nc6
+The human just played Nc6 ([b8c6]).
+Choose exactly one legal move for BLACK in the FEN position above.
+Reply with that move in square brackets using coordinate notation, for example [g8f6] or [e7e8q] for a promotion.
+Put the bracketed move first. Do not mention any other move.
+```
 
 ## 📦 Installation
 
-### Load Unpacked (Developer Mode)
+### Load unpacked (development)
 
-1. Clone this repo:
-   ```bash
-   git clone https://github.com/coderunknow/Chess-With-AI.git
-   cd Chess-With-AI
-   ```
-2. Open Chrome → `chrome://extensions/`
-3. Enable **Developer mode** (top right)
-4. Click **Load unpacked** → Select this project folder
-5. Pin **AI Chess Companion** to your toolbar
+```bash
+git clone https://github.com/coderunknow/Chess-With-AI.git
+cd Chess-With-AI
+```
 
-### From Chrome Web Store
+1. Open `chrome://extensions/`
+2. Enable **Developer mode**
+3. Click **Load unpacked** and select the repository folder
+4. Pin **AI Chess Companion** to the toolbar
 
-> Coming soon. The extension is ready for store submission — see `docs/STORE_LISTING.md`.
+There is no build step: the repository is the extension. Node is only needed for tests and tooling.
+
+### From the Chrome Web Store
+
+> Coming soon — see `docs/STORE_LISTING.md`.
 
 ## 🎮 Usage
 
-1. Open any supported AI chat:
-   - `https://gemini.google.com`
-   - `https://chatgpt.com` / `https://chat.openai.com`
-   - `https://claude.ai`
-   - `https://grok.com`
-   - `https://www.perplexity.ai`
-   - `https://copilot.microsoft.com`
-2. Click the extension icon → Side panel opens with the board
-3. Play as White — click a piece, then a highlighted destination
-4. Your move is auto-sent to the AI as:
-   ```
-   You are the black side in a chess game.
-   The human just played [e2e4].
-   Current position (FEN): rnbqkbnr/pppppppp/8/4P3/8/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1
-   Choose one legal move for Black...
-   Return the move in UCI coordinate notation inside square brackets...
-   ```
-5. Wait for AI to reply with e.g. `[e7e5]` — board updates automatically
-6. Continue! Use **Reset game** anytime.
+1. Open a supported AI chat: `gemini.google.com`, `chatgpt.com`, `claude.ai`, `grok.com`, `www.perplexity.ai` or `copilot.microsoft.com`.
+2. Click the extension icon — the side panel opens and the toolbar badge shows `AI` when the active tab is supported.
+3. Play as White: click a piece, then a highlighted destination. Promotions open a piece chooser.
+4. The extension sends the FEN and your move to the active chat. When the AI answers with `[e7e5]`, the board updates.
+5. Use **Undo**, **New game**, **Flip**, **Copy PGN** or the **PGN…** dialog as needed. Settings lets you switch sides and turn the automatic retry on or off.
 
-> **Tip:** Tell your AI at the start: *"Let's play chess. Always reply with your move in brackets like [e7e5]."* The extension already instructs this, but a nudge helps.
+> **Tip:** the opening prompt already tells the AI the protocol. If a model still rambles, reply once with
+> _"Always answer with exactly one move in brackets, like [e7e5]."_ — the extension picks up the bracketed move and ignores the prose.
 
-## 🗂️ Project Structure
+## 🗂️ Repository layout
 
 ```
 .
-├── manifest.json      # Manifest V3 config — permissions, side_panel, content_scripts
-├── background.js      # Service worker — panel enablement, tab tracking
-├── content.js         # AI chat bridge — input detection + response observer
-├── sidepanel.html     # Board UI + styles (dark theme)
-├── sidepanel.js       # Chess engine + UI logic + messaging
-├── README.md          # This file
-├── LICENSE            # MIT License
-├── CHANGELOG.md       # Version history
-├── CONTRIBUTING.md    # How to contribute
-├── CODE_OF_CONDUCT.md # Community guidelines
-├── SECURITY.md        # Security policy
-├── PRIVACY.md         # Privacy policy
-├── SUPPORT.md         # Help & support
-└── .github/           # Issue templates & PR template
+├── manifest.json           # generated host lists — see npm run sync:manifest
+├── sidepanel.html          # side panel markup (the only HTML entry point)
+├── src
+│   ├── core/               # chess engine: position, moves, FEN, SAN/PGN
+│   ├── shared/             # platforms, messaging, prompts, settings, storage, logging
+│   ├── background/         # service worker: panel behaviour, badge, active tab
+│   ├── content/            # AI chat bridge, transcript observer, DOM helpers
+│   └── ui/                 # side panel app: game model, board, history, status, theme
+├── test/                   # node:test suites plus DOM/Chrome doubles
+├── scripts/                # manifest check/sync, packaging, smoke test
+├── docs/                   # architecture, development, FAQ, store listing
+└── icons/                  # 16/48/128 px extension icons
 ```
-
-No build step, no bundler, no dependencies. Pure vanilla JS.
 
 ## 🔧 Development
 
-### Requirements
-- Chrome 114+ (Side Panel API support)
-- No npm install needed
+```bash
+npm ci            # dev dependencies (eslint, prettier) — the extension itself has none
+npm test          # node:test suites, no browser required
+npm run lint      # eslint
+npm run format    # prettier
+npm run verify    # manifest check + lint + format check + tests
+npm run package   # build/ai-chess-companion-<version>.zip for the store
+```
 
-### Local Development
-1. Make changes to any file
-2. Go to `chrome://extensions/` → Click **Reload** on AI Chess Companion
-3. Reload your AI chat tab
+Reloading after a change: click **Reload** on the extension card in `chrome://extensions/`, then reload the AI chat tab.
+The side panel picks up its own changes on reopen.
 
-### Key Implementation Details
+See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for the architecture walkthrough, the per-platform selector tables, and how to add a new AI host.
 
-**Move Validation (`sidepanel.js`):**
-- `parseFen()` → `emptyBoard()` → board dictionary
-- `isPseudoLegalMove()` handles pawn, knight, bishop, rook, queen, king + castling
-- `isSquareAttacked()` + `isInCheck()` → `isLegalMove()` clones state and tests for king safety
-- `makeMoveUnchecked()` updates castling rights, en passant, halfmove/fullmove
+## ✅ Quality
 
-**AI Chat Injection (`content.js`):**
-- `INPUT_SELECTORS`: textarea, contenteditable, role=textbox — sorted by viewport bottom
-- `setNativeValue()` uses prototype setter to trigger React-controlled inputs
-- `populateInput()` + `submitInput()` → tries send button click, falls back to Enter key events
-- `MutationObserver` watches `document.body` subtree for assistant message nodes
-
-**Panel Lifecycle (`background.js`):**
-- `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`
-- `tabs.onUpdated` / `onActivated` enables panel only on whitelisted hosts
+| Area              | How it is verified                                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Move generation   | `perft` node counts from the Chess Programming Wiki for six positions                                                        |
+| Rules edge cases  | Unit tests for pins, castling through check, en passant legality, promotion, draws                                           |
+| SAN/PGN           | Morphy's Opera Game replayed move by move; import/export round trips                                                         |
+| Panel behaviour   | Full orchestration tests against DOM and `chrome.*` doubles                                                                  |
+| Markup/code drift | Tests assert every `#id` the code uses exists in `sidepanel.html`                                                            |
+| Manifest          | `npm run check:manifest` — hosts, permissions, versions and the dynamically imported module graph                            |
+| Supply chain      | No runtime dependencies; the packaged archive contains only `manifest.json`, `sidepanel.html`, `src/`, `icons/` and licences |
 
 ## 🔒 Privacy
 
-See [PRIVACY.md](./PRIVACY.md). TL;DR:
-- No data leaves your browser except the chess prompts you already send to your chosen AI
-- No analytics, no tracking, no external servers
-- All chess logic runs locally in the side panel
+See [PRIVACY.md](./PRIVACY.md). In short: no analytics, no servers, no accounts. Game state and settings live in
+`chrome.storage.local`. The only data that leaves your browser is the chess prompt typed into your own AI chat.
 
 ## 🤝 Contributing
 
-Contributions welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
-
-Ideas:
-- Add more AI hosts
-- Piece promotion chooser UI
-- Move history & PGN export
-- Stockfish evaluation as optional helper
-- Themes, sound, drag-and-drop
-- Icons & better a11y
+Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+Good first issues: a new AI platform, a new board theme, translations, or drag-and-drop pieces.
 
 ## 📝 Changelog
 
@@ -162,18 +153,14 @@ See [CHANGELOG.md](./CHANGELOG.md).
 
 ## 🆘 Support
 
-See [SUPPORT.md](./SUPPORT.md) — how to file bugs, get help, and FAQ.
+See [SUPPORT.md](./SUPPORT.md) and [docs/FAQ.md](docs/FAQ.md).
 
 ## 📜 License
 
-MIT License — see [LICENSE](./LICENSE). Copyright (c) 2026 coderunknow.
+MIT — see [LICENSE](./LICENSE). Copyright (c) 2026 coderunknow.
 
-## 🙏 Acknowledgments
+## 🙏 Acknowledgements
 
-- Chess Unicode glyphs for zero-dependency rendering
-- Inspired by the idea of playing chess *with* LLMs, not against a hardcoded engine
-- Thanks to all AI platforms that make conversational chess possible
-
----
-
-**Enjoy!** If you like this, please ⭐ star the repo and share it.
+- [Perft reference counts](https://www.chessprogramming.org/Perft_Results) — Chess Programming Wiki
+- Unicode chess glyphs, which keep the board dependency-free
+- Everyone playing chess with a language model instead of against an engine

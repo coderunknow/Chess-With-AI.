@@ -2,13 +2,13 @@
 
 **Effective Date:** September 23, 2026
 **Extension Name:** AI Chess Companion (Chess With AI)
-**Version:** 1.0.0
+**Version:** 0.1.0
 
 ## Summary
 
 **We do not collect, store, or transmit any personal data.**
 
-AI Chess Companion is designed to be privacy-first and fully local. All chess logic runs in your browser. The only network communication is the prompt that *you* already send to your chosen AI chat (Gemini, ChatGPT, Claude, etc.) via the content script that automates typing into that chat's input box.
+AI Chess Companion is designed to be privacy-first and fully local. All chess logic runs in your browser. The only network communication is the prompt that _you_ already send to your chosen AI chat (Gemini, ChatGPT, Claude, etc.) via the content script that automates typing into that chat's input box.
 
 ## What the Extension Does
 
@@ -32,10 +32,10 @@ AI Chess Companion is designed to be privacy-first and fully local. All chess lo
 
 Declared in `manifest.json`:
 
-- `sidePanel` — To show the chess board in Chrome's side panel
-- `activeTab` — To identify the active AI chat tab and send it your chess move
-- `scripting` — To ensure content script is present on AI tabs (fallback injection)
-- `host_permissions` — Limited to:
+- `sidePanel` — to show the chess board in Chrome's side panel
+- `storage` — to keep your settings and the running game on your own device (`chrome.storage.local`)
+- `scripting` — fallback injection of the content script so a prompt can still be delivered on AI tabs
+- `host_permissions` — limited to:
   - `https://gemini.google.com/*`
   - `https://chatgpt.com/*`
   - `https://chat.openai.com/*`
@@ -43,13 +43,16 @@ Declared in `manifest.json`:
   - `https://grok.com/*`
   - `https://www.perplexity.ai/*`
   - `https://copilot.microsoft.com/*`
-  
+
   These are needed to inject the content script that bridges board ↔ chat. We do not access any other sites.
+  The list is generated from `src/shared/platforms.js` and verified in CI.
 
 ## Data Storage
 
-- **Local only:** Game state (board, history, FEN) lives in the side panel's JS memory and is reset on panel close or via Reset button. We do not use `chrome.storage` to persist it in v1.0.0.
-- No cookies, no localStorage of personal data.
+- **Local only.** Settings (side, theme, toggles) and the running game (starting position and the move list) are
+  stored with `chrome.storage.local` on your device so the panel can be reopened without losing the game.
+  Turning off _Remember the game between sessions_ deletes the stored game, and **New game** replaces it.
+- No cookies, no tracking identifiers, and nothing from storage is ever uploaded.
 
 ## Third Parties
 
@@ -71,4 +74,3 @@ For privacy questions: open an issue on GitHub or email accicloudnha@gmail.com.
 ## Compliance
 
 This extension aims to comply with Chrome Web Store Developer Program Policies, including the limited use and user data policies.
-

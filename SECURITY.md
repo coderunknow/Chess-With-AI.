@@ -4,7 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
+| 0.1.x   | :white_check_mark: |
 
 We currently maintain only the latest `main` branch. If you are on an older unpacked version, please update by pulling `main` and reloading the extension in `chrome://extensions`.
 
@@ -37,10 +37,18 @@ We aim to acknowledge within 48 hours and provide a fix timeline within 7 days f
 
 ## Security Practices in this Extension
 
-- **No external network**: No `fetch` to third-party servers. Only `chrome.tabs.sendMessage` / `chrome.runtime.sendMessage` locally, and DOM injection into the active AI tab the user already visits.
-- **UCI validation**: All moves are validated via regex `^[a-h][1-8][a-h][1-8][qrbn]?$` and legal-move engine before applying.
-- **Minimal permissions**: Only `sidePanel`, `activeTab`, `scripting` + explicit AI hosts. No `<all_urls>`.
-- **Safe DOM**: Uses `textContent`, `createElement`, no `innerHTML` with untrusted strings.
-- **Isolated content script**: Guards against double-load via `window.__AI_CHESS_COMPANION_LOADED__`.
+- **No external network**: no `fetch`, `XMLHttpRequest` or WebSocket anywhere in `src/`; the only traffic is the
+  prompt typed into the AI chat tab the user is already visiting. `test/markup.test.js` asserts this.
+- **UCI validation**: every candidate move is parsed and matched against the engine's legal move list before it is
+  applied; nothing else from a page is trusted.
+- **Message validation**: every runtime message is checked against the typed contract in `src/shared/messaging.js`,
+  and prompt text is length-bounded before it is typed into a page.
+- **Minimal permissions**: `sidePanel`, `scripting`, `storage` plus explicit AI hosts. No `<all_urls>`, no `tabs`.
+- **Safe DOM**: `textContent` and `createElement` only — no `innerHTML`, no `eval`, no `new Function`.
+- **Isolated content script**: the classic bootstrap and the module entry both guard against double execution; the
+  ESM graph is loaded through `web_accessible_resources`, whose completeness is verified in CI.
+- **Untrusted storage**: settings and snapshots are validated on read, and an unreplayable snapshot is discarded
+  rather than trusted.
+- **Zero runtime dependencies**: nothing third-party is shipped in the packaged archive.
 
 If you find a bypass, please report privately as above. Thank you for helping keep users safe!

@@ -1,13 +1,30 @@
 {
   "manifest_version": 3,
   "name": "AI Chess Companion",
-  "version": "1.0.0",
-  "description": "Play chess alongside Gemini, ChatGPT, Claude, Grok, and other AI chat assistants.",
-  "permissions": [
-    "sidePanel",
-    "activeTab",
-    "scripting"
-  ],
+  "version": "0.1.0",
+  "description": "Play chess against Gemini, ChatGPT, Claude, Grok, Perplexity and Copilot from the side panel. No backend, 100% local.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "AI Chess Companion — open the board",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background/index.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "permissions": ["sidePanel", "storage", "scripting"],
   "host_permissions": [
     "https://gemini.google.com/*",
     "https://chatgpt.com/*",
@@ -15,17 +32,9 @@
     "https://claude.ai/*",
     "https://grok.com/*",
     "https://www.perplexity.ai/*",
+    "https://perplexity.ai/*",
     "https://copilot.microsoft.com/*"
   ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "action": {
-    "default_title": "Open AI Chess Companion"
-  },
-  "side_panel": {
-    "default_path": "sidepanel.html"
-  },
   "content_scripts": [
     {
       "matches": [
@@ -35,10 +44,26 @@
         "https://claude.ai/*",
         "https://grok.com/*",
         "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
         "https://copilot.microsoft.com/*"
       ],
-      "js": ["content.js"],
+      "js": ["src/content/index.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/content/*.js", "src/core/*.js", "src/shared/*.js"],
+      "matches": [
+        "https://gemini.google.com/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://grok.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://copilot.microsoft.com/*"
+      ]
     }
   ]
 }
