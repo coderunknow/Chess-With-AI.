@@ -66,7 +66,7 @@ jobs:
         run: npm run package
 
       - name: Upload the archive
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ai-chess-companion-${{ github.sha }}
           path: build/*.zip
