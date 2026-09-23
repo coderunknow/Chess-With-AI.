@@ -1,202 +1,148 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Chess Companion</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #101317;
-      --panel: #171c23;
-      --panel-raised: #202731;
-      --border: #303b49;
-      --text: #f3f6fa;
-      --muted: #a4afbe;
-      --accent: #71b7ff;
-      --light-square: #c8d9e8;
-      --dark-square: #477091;
-      --selected: #f4c95d;
-      --target: rgba(100, 220, 140, 0.74);
-      --capture: rgba(242, 107, 107, 0.84);
-    }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Chess Companion</title>
+    <link rel="stylesheet" href="src/ui/theme.css" />
+  </head>
+  <body data-theme="dark">
+    <main class="panel">
+      <header class="panel-header">
+        <div class="panel-title">
+          <p class="eyebrow">Chess against your AI</p>
+          <h1>AI Chess Companion</h1>
+        </div>
+        <span class="panel-mark" aria-hidden="true">&#9822;</span>
+      </header>
 
-    * { box-sizing: border-box; }
+      <section class="board-area" aria-label="Chess board">
+        <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+      </section>
 
-    body {
-      margin: 0;
-      min-width: 280px;
-      background: var(--bg);
-      color: var(--text);
-      font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
+      <p id="status" class="status" role="status" aria-live="polite" data-kind="info">Starting up…</p>
+      <button id="status-action" class="status-action" type="button" hidden></button>
 
-    main { padding: 16px; }
+      <dl class="meta">
+        <div class="meta-row">
+          <dt>Turn</dt>
+          <dd id="turn">White to move</dd>
+        </div>
+        <div class="meta-row">
+          <dt>Opponent</dt>
+          <dd id="opponent">No AI chat open</dd>
+        </div>
+      </dl>
 
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 14px;
-    }
-
-    h1 { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
-
-    .eyebrow {
-      margin: 0 0 2px;
-      color: var(--accent);
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.13em;
-      text-transform: uppercase;
-    }
-
-    .board-wrap {
-      padding: 8px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--panel);
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
-    }
-
-    .board {
-      display: grid;
-      grid-template-columns: repeat(8, minmax(0, 1fr));
-      aspect-ratio: 1;
-      overflow: hidden;
-      border-radius: 6px;
-      user-select: none;
-    }
-
-    .square {
-      position: relative;
-      display: grid;
-      place-items: center;
-      padding: 0;
-      border: 0;
-      color: #16202c;
-      cursor: pointer;
-      font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", serif;
-      font-size: clamp(26px, 11vw, 48px);
-      line-height: 1;
-      transition: filter 120ms ease, box-shadow 120ms ease;
-    }
-
-    .square.light { background: var(--light-square); }
-    .square.dark { background: var(--dark-square); }
-    .square:hover { filter: brightness(1.08); }
-    .square.selected { box-shadow: inset 0 0 0 4px var(--selected); }
-    .square.legal-target::after,
-    .square.capture-target::after {
-      position: absolute;
-      width: 25%;
-      height: 25%;
-      border-radius: 50%;
-      background: var(--target);
-      content: "";
-    }
-
-    .square.capture-target::after {
-      width: 72%;
-      height: 72%;
-      border: 4px solid var(--capture);
-      background: transparent;
-    }
-
-    .square.last-move { box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.33); }
-
-    .piece {
-      position: relative;
-      z-index: 1;
-      filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.4));
-    }
-
-    .white-piece { color: #fff; text-shadow: 0 1px 0 #263242, 0 0 2px #172131; }
-    .black-piece { color: #161d29; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.16); }
-
-    .status {
-      min-height: 40px;
-      margin: 12px 0;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel);
-      color: var(--muted);
-    }
-
-    .status[data-kind="error"] { border-color: #9b4b56; color: #ffb7bd; }
-    .status[data-kind="success"] { border-color: #3b7b5b; color: #a8e8bf; }
-
-    .meta {
-      display: grid;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .meta-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      color: var(--muted);
-    }
-
-    code.fen {
-      display: block;
-      overflow: hidden;
-      padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: 7px;
-      background: #0c0f13;
-      color: #cbd8e7;
-      font: 11px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
-      overflow-wrap: anywhere;
-    }
-
-    button#reset {
-      width: 100%;
-      padding: 9px 12px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel-raised);
-      color: var(--text);
-      cursor: pointer;
-      font: inherit;
-      font-weight: 650;
-    }
-
-    button#reset:hover { border-color: var(--accent); background: #273342; }
-    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-    .hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <div>
-        <p class="eyebrow">Board assistant</p>
-        <h1>AI Chess Companion</h1>
+      <div class="controls">
+        <button id="undo" type="button" class="button">Undo</button>
+        <button id="new-game" type="button" class="button">New game</button>
+        <button id="flip" type="button" class="button" title="Flip the board">Flip</button>
+        <button id="ask-ai" type="button" class="button button-primary" hidden>Ask the AI to move</button>
       </div>
-      <span aria-hidden="true">♞</span>
-    </header>
 
-    <section class="board-wrap" aria-label="Chess board">
-      <div id="board" class="board" role="grid" aria-label="Chess board"></div>
-    </section>
+      <details id="connections" class="panel-section">
+        <summary>AI chat connections</summary>
+        <div class="section-body">
+          <p class="hint">
+            Prompts are typed into the AI chat you already have open. Nothing leaves your browser otherwise.
+          </p>
+          <div class="row">
+            <label class="visually-hidden" for="platform-select">Open an AI chat</label>
+            <select id="platform-select" class="select"></select>
+            <button id="open-platform" type="button" class="button">Open tab</button>
+          </div>
+        </div>
+      </details>
 
-    <div id="status" class="status" role="status" aria-live="polite">Your turn. Select a white piece.</div>
+      <details id="history-section" class="panel-section" open>
+        <summary>Moves</summary>
+        <div class="section-body">
+          <p id="moves-empty" class="hint">No moves yet. Play a white piece to start.</p>
+          <ol id="moves" class="history" reversed></ol>
+          <div class="row">
+            <button id="copy-pgn" type="button" class="button">Copy PGN</button>
+            <button id="open-pgn" type="button" class="button">PGN…</button>
+          </div>
+        </div>
+      </details>
 
-    <div class="meta">
-      <div class="meta-row"><span>Turn</span><strong id="turn">White</strong></div>
-      <div class="meta-row"><span>Last move</span><strong id="last-move">—</strong></div>
-      <code id="fen" class="fen" aria-label="Current FEN"></code>
-    </div>
+      <details class="panel-section">
+        <summary>Position</summary>
+        <div class="section-body">
+          <code id="fen" class="fen" aria-label="Current FEN"></code>
+          <div class="row">
+            <button id="copy-fen" type="button" class="button">Copy FEN</button>
+            <button id="open-settings" type="button" class="button">Settings</button>
+          </div>
+        </div>
+      </details>
+    </main>
 
-    <button id="reset" type="button">Reset game</button>
-    <p class="hint">Make a move while an AI chat tab is active. The position and UCI move are sent automatically.</p>
-  </main>
-  <script src="sidepanel.js"></script>
-</body>
+    <dialog id="promotion-dialog" class="dialog dialog-compact" aria-labelledby="promotion-title">
+      <h2 id="promotion-title" class="dialog-title">Promote the pawn</h2>
+      <div class="promotion-grid">
+        <button type="button" class="promotion-button" data-piece="q"></button>
+        <button type="button" class="promotion-button" data-piece="r"></button>
+        <button type="button" class="promotion-button" data-piece="b"></button>
+        <button type="button" class="promotion-button" data-piece="n"></button>
+      </div>
+      <button type="button" class="button" data-cancel>Cancel</button>
+    </dialog>
+
+    <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+      <h2 id="settings-title" class="dialog-title">Settings</h2>
+      <label class="field" for="settings-side">
+        <span>Play as</span>
+        <select id="settings-side" class="select">
+          <option value="w">White (moves first)</option>
+          <option value="b">Black (the AI opens)</option>
+        </select>
+      </label>
+      <label class="field" for="settings-theme">
+        <span>Theme</span>
+        <select id="settings-theme" class="select">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+      <div class="field-group">
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="showCoordinates" /><span>Show coordinates</span></label
+        >
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="showLegalTargets" /><span>Highlight legal moves</span></label
+        >
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="highlightLastMove" /><span>Highlight the last move</span></label
+        >
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="autoRetry" /><span
+            >Ask again when the AI answers an illegal move</span
+          ></label
+        >
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="persistGame" /><span>Remember the game between sessions</span></label
+        >
+      </div>
+      <p class="hint">Settings are stored locally with <code>chrome.storage.local</code>. Nothing is uploaded.</p>
+      <form method="dialog" class="dialog-actions">
+        <button type="submit" class="button button-primary">Done</button>
+      </form>
+    </dialog>
+
+    <dialog id="pgn-dialog" class="dialog" aria-labelledby="pgn-title">
+      <h2 id="pgn-title" class="dialog-title">Game PGN</h2>
+      <label class="visually-hidden" for="pgn-text">PGN text</label>
+      <textarea id="pgn-text" class="textarea" spellcheck="false" rows="10"></textarea>
+      <p id="pgn-status" class="hint" role="status" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button id="pgn-copy" type="button" class="button">Copy</button>
+        <button id="pgn-load" type="button" class="button button-primary">Load into board</button>
+        <form method="dialog"><button type="submit" class="button">Close</button></form>
+      </div>
+    </dialog>
+
+    <script type="module" src="src/ui/main.js"></script>
+  </body>
 </html>

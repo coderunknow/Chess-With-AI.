@@ -1,0 +1,7 @@
+node_modules/
+build/
+coverage/
+icons/
+package-lock.json
+CHANGELOG.md
+CODE_OF_CONDUCT.md

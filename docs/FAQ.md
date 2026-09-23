@@ -1,58 +1,74 @@
-# FAQ — AI Chess Companion
+# FAQ
 
-### Is this an AI chess engine?
+### Is this a chess engine?
 
-No. This extension does NOT include Stockfish or any built-in AI opponent. It lets you play *with* LLMs like ChatGPT, Gemini, Claude, etc. The LLM is Black. You are White. The extension just bridges moves.
+It contains one — a complete rules engine that validates every move — but it is not an _opponent_. The AI you are
+already chatting with plays the other side; the extension handles the rules, the board and the plumbing.
 
 ### Does it need an API key?
 
-No. It automates the chat UI you already use. No OpenAI / Google API key needed.
+No. It automates the chat interface you already have open. There is no OpenAI/Google/Anthropic key, no account, and
+no server in the middle.
 
-### Why does the AI make illegal moves sometimes?
+### Do I need to install anything for development?
 
-LLMs are not chess engines. They hallucinate. The extension validates moves locally and will show an error if illegal. Nudge the AI with the FEN: "That move is illegal. Current FEN: ... Please choose a legal move for Black in [brackets]."
+Only if you want to run the tests and linters (`npm ci`). The extension itself has no build step and no runtime
+dependencies: `git clone`, load unpacked, play.
 
-### Which AI is best at chess?
+### Why does the AI sometimes answer with an illegal move?
 
-In community testing:
-- Claude 3.5 Sonnet and GPT-4o tend to be stronger
-- Gemini 1.5 Pro decent
-- Grok / Perplexity vary
-All benefit from reminding them to use brackets and think step by step.
+Language models are not chess engines. The extension validates every reply and, by default, sends one corrected
+request automatically ("`[e7e5]` is not legal in this position…"). If it still fails, the status line offers
+**Ask again**. Fewer mistakes if you keep the chat focused and do not edit previous prompts.
+
+### Which AI plays best?
+
+Community experience points at the larger Claude and GPT models, with Gemini close behind; Grok and Perplexity vary
+a lot by model. Bracketed-move compliance matters more than raw strength — a model that answers `[g8f6]` first time
+is more fun to play than one that is stronger but rambles.
 
 ### Can I play as Black?
 
-Not in v1.0.0. You are always White (you start). Black-as-player is on the roadmap.
+Yes. Settings → **Play as** → Black. A new game starts, the board flips, and the extension asks the AI to make the
+first move.
 
-### Can I undo a move?
+### Can I resume a game after closing the panel?
 
-Not yet. Use Reset button to start over. Undo/PGN history is planned.
+Yes, as long as **Remember the game between sessions** is on (default). The position is stored locally in
+`chrome.storage.local`; turning the option off deletes the stored game.
 
-### Does it work on mobile?
+### Is my game uploaded anywhere?
 
-No, Chrome Extensions sidePanel API is desktop Chrome only.
+No. There is no analytics and no external endpoint. The only thing that leaves your browser is the chess prompt
+typed into your own AI chat — the same message you would type by hand.
 
-### Why no icons in the toolbar?
+### Why does nothing happen when I play a move?
 
-v1.0.0 ships without icons to keep it minimal. Icons are in `/icons/` folder ready for next version. You can add them locally to manifest.json if you want.
+Usually one of these:
 
-### Is my chat data collected?
+1. **No supported AI tab is active.** The status line says so and offers **Open an AI chat**.
+2. **The site changed its composer.** The content script falls back to generic selectors, but a redesign can break
+   them. If the panel reports "Could not find the chat input box", please open an issue with the site name.
+3. **The prompt was typed but not submitted.** Some sites require the send button; the bridge tries the button first
+   and then Enter. If both fail you will see "Could not submit the prompt" — send it manually once and the
+   extension will keep watching for the reply.
 
-No. See PRIVACY.md. The only data sent is the chess prompt you see being typed into your AI chat. No external servers.
+### Can I import a game I played elsewhere?
 
-### Can I add another AI site?
+Yes — **PGN…** → paste → **Load into board**. Comments, variations, NAGs and `0-0`-style castling are tolerated.
+Unreadable moves stop the import at that point and the panel tells you which move it could not read.
 
-Yes! See CONTRIBUTING.md and docs/DEVELOPMENT.md → "Adding a New AI Host". Open a PR.
+### Does the extension work in Firefox or Edge?
 
-### Does it work with chess.com / lichess.org?
+Edge can install Chrome extensions from the store and works. Firefox uses a different extension model (no side
+panel API of the same shape, different `browser.*` namespace) and is not supported today.
 
-No. It's designed for AI chat sites, not chess platforms. For chess.com/lichess you don't need this extension.
+### Why is the board so small in the side panel?
 
-### How do I export the game?
+The board fills the panel width. Chrome lets you detach the side panel or widen it — the board scales with it. You
+can also switch off **Show coordinates** and collapse the sections you do not need.
 
-Copy FEN from panel. PGN export coming soon. For now you can manually reconstruct from history.
+### How do I report a bug?
 
-### I found a bug where castling fails.
-
-Check: castling rights in FEN (KQkq), squares empty, king not in check, king doesn't pass through check, rook still there. If still fails, open bug report with FEN.
-
+See [SUPPORT.md](../SUPPORT.md). Include the platform, Chrome version, extension version and what the status line
+said — that usually identifies the failing layer immediately.

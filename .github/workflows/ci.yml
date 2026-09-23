@@ -2,65 +2,73 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint & Validate
+  verify:
+    name: Lint, test & validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 22
+          cache: npm
 
-      - name: Validate manifest.json
-        run: |
-          echo "Validating manifest.json..."
-          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest.json is valid JSON')"
-          node -e "
-            const m = JSON.parse(require('fs').readFileSync('manifest.json','utf8'));
-            const required = ['manifest_version','name','version','description','permissions','background','side_panel','content_scripts'];
-            for (const k of required) {
-              if (!(k in m)) { console.error('Missing key:', k); process.exit(1); }
-            }
-            if (m.manifest_version !== 3) { console.error('Must be MV3'); process.exit(1); }
-            console.log('Manifest keys OK, MV3 confirmed');
-          "
+      - name: Install development dependencies
+        run: npm ci
 
-      - name: Check JS syntax
-        run: |
-          echo "Checking JS syntax..."
-          for f in background.js content.js sidepanel.js; do
-            echo "→ $f"
-            node --check "$f"
-          done
-          echo "All JS files syntactically valid"
+      - name: Validate the manifest against the platform registry
+        run: npm run check:manifest
 
-      - name: Check for unsafe patterns
-        run: |
-          echo "Scanning for unsafe patterns..."
-          # Disallow innerHTML with untrusted data (warn), eval, remote fetch to non-AI hosts
-          if grep -R "innerHTML" --include="*.js" . | grep -v "docs/" | grep -v ".github/"; then
-            echo "::warning::Found innerHTML usage — ensure it's safe (no untrusted AI output)"
-          fi
-          if grep -R "eval(" --include="*.js" .; then
-            echo "::error::eval() found — not allowed"
-            exit 1
-          fi
-          if grep -R "fetch(" --include="*.js" background.js content.js sidepanel.js; then
-            echo "::warning::fetch() found — ensure no external data exfiltration"
-          fi
-          echo "Security scan done"
+      - name: Lint
+        run: npm run lint
 
-      - name: Package extension (dry run)
-        run: |
-          echo "Packaging extension..."
-          zip -r extension.zip . -x "*.git*" "docs/*" ".github/*" "*.DS_Store" "node_modules/*" "*.zip" "*.crx"
-          ls -lh extension.zip
-          echo "Package size: $(du -h extension.zip | cut -f1)"
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Smoke test
+        run: npm run dev:smoke
+
+  package:
+    name: Package extension
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install development dependencies
+        run: npm ci
+
+      - name: Build the store archive
+        run: npm run package
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chess-companion-${{ github.sha }}
+          path: build/*.zip
+          if-no-files-found: error
+          retention-days: 14
