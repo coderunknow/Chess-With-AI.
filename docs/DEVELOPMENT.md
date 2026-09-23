@@ -105,14 +105,26 @@ it used at debug level, which usually shows which one matched the wrong element.
 - Validate anything that comes from a page, a message or storage before using it.
 - Comments explain _why_; JSDoc types are expected on exported functions.
 
+## Continuous integration
+
+Two workflows live in `.github/workflows/`:
+
+- `ci.yml` runs on every push and pull request. It lints, format-checks, runs the tests, validates the manifest and
+  the module graph, and uploads the packaged archive as a build artifact.
+- `release.yml` runs on `v*` tags. It repeats the full verification, refuses to publish when `manifest.json` does not
+  match the tag, builds `build/ai-chess-companion-<version>.zip` and attaches it to the GitHub release. Use
+  **Actions → Release → Run workflow** with an existing tag to rebuild a release without moving the tag.
+
 ## Releasing
 
 1. Update `APP_VERSION` in `src/shared/meta.js` (single source of truth for the version).
 2. Run `npm run sync:manifest` — it copies the version into `manifest.json`.
 3. Add a `CHANGELOG.md` entry.
-4. `npm run verify && npm run package`.
-5. Commit, tag `v<version>`, push the tag, and attach `build/ai-chess-companion-<version>.zip` to the GitHub release.
-6. Upload the same archive to the Chrome Web Store developer dashboard.
+4. `npm run verify && npm run package` locally, and capture the output for the pull request.
+5. Merge to `main`, then tag and push: `git tag -a v<version> -m "<version>" && git push origin v<version>`.
+6. Let the `Release` workflow attach the archive, and confirm the release page lists
+   `ai-chess-companion-<version>.zip` before announcing it.
+7. Upload the same archive to the Chrome Web Store developer dashboard.
 
 ## Dependencies policy
 
