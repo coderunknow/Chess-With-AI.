@@ -1,0 +1,84 @@
+name: Release
+
+# Builds the Chrome Web Store archive on a version tag and attaches it to the
+# GitHub release, so every release is reproducible from the repository alone.
+#
+# Manual runs are useful when a release needs to be rebuilt (for example after
+# a CI-only fix): pass the existing tag.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to rebuild (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package and publish
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout the tagged revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install development dependencies
+        run: npm ci
+
+      - name: Verify the extension
+        run: npm run verify
+
+      - name: Check the manifest version against the tag
+        run: |
+          VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('manifest.json','utf8')).version")"
+          if [ "v${VERSION}" != "${TAG}" ]; then
+            echo "::error::manifest.json is version ${VERSION} but the tag is ${TAG}"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Release ${TAG} matches manifest version ${VERSION}"
+
+      - name: Build the store archive
+        run: npm run package
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists — attaching the archive"
+          else
+            gh release create "${TAG}" \
+              --title "AI Chess Companion ${TAG}" \
+              --generate-notes \
+              --verify-tag
+          fi
+          gh release upload "${TAG}" "build/ai-chess-companion-${VERSION}.zip" --clobber
+
+      - name: Summarise
+        run: |
+          {
+            echo "## Released ${TAG}"
+            echo
+            echo "- archive: \`build/ai-chess-companion-${VERSION}.zip\`"
+            echo "- release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          } >> "$GITHUB_STEP_SUMMARY"
