@@ -393,5 +393,695 @@
   },
   "illegal_repeated_move": {
     "message": "That move was already rejected in this position; choose a different legal move."
+  },
+  "app_title": {
+    "message": "AI Chess Companion"
+  },
+  "app_eyebrow": {
+    "message": "Chess against your AI"
+  },
+  "app_loading": {
+    "message": "Starting up…"
+  },
+  "board_label": {
+    "message": "Chess board"
+  },
+  "board_check": {
+    "message": "{color} is in check"
+  },
+  "board_checkmate": {
+    "message": "Checkmate"
+  },
+  "board_stalemate": {
+    "message": "Stalemate"
+  },
+  "board_empty": {
+    "message": "empty"
+  },
+  "board_selected": {
+    "message": "selected"
+  },
+  "board_legalMove": {
+    "message": "legal move"
+  },
+  "status_yourMove": {
+    "message": "Your move. Playing as {color}."
+  },
+  "status_yourMoveWhite": {
+    "message": "Your move. Playing as White."
+  },
+  "status_yourMoveBlack": {
+    "message": "Your move. Playing as Black."
+  },
+  "status_waitingAi": {
+    "message": "Waiting for {platform} to answer…"
+  },
+  "status_sending": {
+    "message": "Sending your move to {platform}…"
+  },
+  "status_noAi": {
+    "message": "No AI chat detected. Open one of the supported AI chats to play."
+  },
+  "status_noAiAction": {
+    "message": "Open an AI chat"
+  },
+  "status_gameOver": {
+    "message": "Game over"
+  },
+  "status_newGame": {
+    "message": "New game"
+  },
+  "status_check": {
+    "message": "You are in check — only legal escapes are shown."
+  },
+  "status_undo": {
+    "message": "Took back {count} {count, plural, one {ply} other {plies}}."
+  },
+  "status_nothingToUndo": {
+    "message": "There is nothing to undo yet."
+  },
+  "status_gameOverNew": {
+    "message": "The game is over — start a new game to keep playing."
+  },
+  "status_aiTurn": {
+    "message": "It is the AI's turn."
+  },
+  "status_aiBelongs": {
+    "message": "That piece belongs to the AI."
+  },
+  "status_selectPiece": {
+    "message": "Select one of your pieces first."
+  },
+  "status_noLegalMoves": {
+    "message": "That piece has no legal moves."
+  },
+  "status_promotionCancelled": {
+    "message": "Promotion cancelled."
+  },
+  "status_fenCopied": {
+    "message": "FEN copied."
+  },
+  "status_pgnCopied": {
+    "message": "PGN copied to the clipboard."
+  },
+  "status_copyFailed": {
+    "message": "Copying failed — your browser blocked clipboard access."
+  },
+  "status_storageFull": {
+    "message": "Storage is full — delete old games to free space."
+  },
+  "status_contentMissing": {
+    "message": "Content script not found — reload the AI tab to connect."
+  },
+  "status_reloadTab": {
+    "message": "Reload the tab"
+  },
+  "status_copyPrompt": {
+    "message": "Copy prompt"
+  },
+  "status_promptCopied": {
+    "message": "Prompt copied — paste it into the AI chat."
+  },
+  "status_askAi": {
+    "message": "Ask the AI to move"
+  },
+  "status_askAgain": {
+    "message": "Ask again"
+  },
+  "status_openAi": {
+    "message": "Open an AI chat"
+  },
+  "status_retrying": {
+    "message": "Asking the AI again (attempt {attempt})…"
+  },
+  "status_illegalAi": {
+    "message": "The AI answered [{move}], which is not legal here. Ask again or adjust the position."
+  },
+  "status_couldNotReach": {
+    "message": "Could not reach the AI tab: {detail}"
+  },
+  "status_composerMissing": {
+    "message": "Could not find the chat input box on this page."
+  },
+  "status_typeFailed": {
+    "message": "Could not type the chess prompt into the chat input box."
+  },
+  "status_submitFailed": {
+    "message": "Could not submit the prompt. Send it manually to continue."
+  },
+  "controls_undo": {
+    "message": "Undo"
+  },
+  "controls_newGame": {
+    "message": "New game"
+  },
+  "controls_flip": {
+    "message": "Flip"
+  },
+  "controls_askAi": {
+    "message": "Ask the AI to move"
+  },
+  "controls_copyPgn": {
+    "message": "Copy PGN"
+  },
+  "controls_openPgn": {
+    "message": "PGN…"
+  },
+  "controls_copyFen": {
+    "message": "Copy FEN"
+  },
+  "controls_settings": {
+    "message": "Settings"
+  },
+  "moves_title": {
+    "message": "Moves"
+  },
+  "moves_empty": {
+    "message": "No moves yet. Play a white piece to start."
+  },
+  "moves_white": {
+    "message": "white move"
+  },
+  "moves_black": {
+    "message": "black move"
+  },
+  "moves_notPlayed": {
+    "message": "not played"
+  },
+  "position_title": {
+    "message": "Position"
+  },
+  "position_fen": {
+    "message": "Current FEN"
+  },
+  "connections_title": {
+    "message": "AI chat connections"
+  },
+  "connections_hint": {
+    "message": "Prompts go only to the AI tab you pin. Nothing leaves your browser otherwise."
+  },
+  "connections_openTab": {
+    "message": "Open tab"
+  },
+  "promotion_title": {
+    "message": "Promote the pawn"
+  },
+  "promotion_queen": {
+    "message": "Promote to queen"
+  },
+  "promotion_rook": {
+    "message": "Promote to rook"
+  },
+  "promotion_bishop": {
+    "message": "Promote to bishop"
+  },
+  "promotion_knight": {
+    "message": "Promote to knight"
+  },
+  "promotion_cancel": {
+    "message": "Cancel"
+  },
+  "settings_title": {
+    "message": "Settings"
+  },
+  "settings_playAs": {
+    "message": "Play as"
+  },
+  "settings_playAsWhite": {
+    "message": "White (moves first)"
+  },
+  "settings_playAsBlack": {
+    "message": "Black (the AI opens)"
+  },
+  "settings_theme": {
+    "message": "Theme"
+  },
+  "settings_themeDark": {
+    "message": "Dark"
+  },
+  "settings_themeLight": {
+    "message": "Light"
+  },
+  "settings_themeSystem": {
+    "message": "System"
+  },
+  "settings_locale": {
+    "message": "Language"
+  },
+  "settings_localeEn": {
+    "message": "English"
+  },
+  "settings_localeVi": {
+    "message": "Tiếng Việt"
+  },
+  "settings_localeSystem": {
+    "message": "System"
+  },
+  "settings_boardTheme": {
+    "message": "Board theme"
+  },
+  "settings_boardClassic": {
+    "message": "Classic"
+  },
+  "settings_boardBlue": {
+    "message": "Blue"
+  },
+  "settings_boardGreen": {
+    "message": "Green"
+  },
+  "settings_boardHighContrast": {
+    "message": "High contrast"
+  },
+  "settings_fontScale": {
+    "message": "Font scale"
+  },
+  "settings_fontSmall": {
+    "message": "Small"
+  },
+  "settings_fontMedium": {
+    "message": "Medium"
+  },
+  "settings_fontLarge": {
+    "message": "Large"
+  },
+  "settings_density": {
+    "message": "Density"
+  },
+  "settings_densityComfortable": {
+    "message": "Comfortable"
+  },
+  "settings_densityCompact": {
+    "message": "Compact"
+  },
+  "settings_showCoordinates": {
+    "message": "Show coordinates"
+  },
+  "settings_showLegalTargets": {
+    "message": "Highlight legal moves"
+  },
+  "settings_highlightLastMove": {
+    "message": "Highlight the last move"
+  },
+  "settings_autoRetry": {
+    "message": "Ask again when the AI answers an illegal move"
+  },
+  "settings_persistGame": {
+    "message": "Remember the game between sessions"
+  },
+  "settings_soundEnabled": {
+    "message": "Play sounds (move, capture, check)"
+  },
+  "settings_clockEnabled": {
+    "message": "Show clocks"
+  },
+  "settings_animationsEnabled": {
+    "message": "Animate moves"
+  },
+  "settings_evalBarEnabled": {
+    "message": "Show evaluation bar"
+  },
+  "settings_hint": {
+    "message": "Settings are stored locally. Nothing is uploaded."
+  },
+  "settings_done": {
+    "message": "Done"
+  },
+  "settings_reset": {
+    "message": "Reset to defaults"
+  },
+  "pgn_title": {
+    "message": "Game PGN"
+  },
+  "pgn_copy": {
+    "message": "Copy"
+  },
+  "pgn_load": {
+    "message": "Load into board"
+  },
+  "pgn_close": {
+    "message": "Close"
+  },
+  "pgn_placeholder": {
+    "message": "Paste PGN here…"
+  },
+  "library_title": {
+    "message": "Game library"
+  },
+  "library_empty": {
+    "message": "No saved games yet."
+  },
+  "library_new": {
+    "message": "New game"
+  },
+  "library_open": {
+    "message": "Open"
+  },
+  "library_rename": {
+    "message": "Rename"
+  },
+  "library_duplicate": {
+    "message": "Duplicate"
+  },
+  "library_delete": {
+    "message": "Delete"
+  },
+  "library_undoDelete": {
+    "message": "Game deleted — Undo"
+  },
+  "library_undo": {
+    "message": "Undo"
+  },
+  "library_search": {
+    "message": "Search games"
+  },
+  "library_import": {
+    "message": "Import PGN"
+  },
+  "library_export": {
+    "message": "Export"
+  },
+  "library_titleLabel": {
+    "message": "Title"
+  },
+  "library_date": {
+    "message": "Date"
+  },
+  "library_result": {
+    "message": "Result"
+  },
+  "library_moves": {
+    "message": "{count} moves"
+  },
+  "analysis_title": {
+    "message": "Analysis"
+  },
+  "analysis_hint": {
+    "message": "Local engine — heuristic evaluation, not perfect."
+  },
+  "analysis_bestMove": {
+    "message": "Best move"
+  },
+  "analysis_eval": {
+    "message": "Evaluation"
+  },
+  "analysis_hintButton": {
+    "message": "Hint"
+  },
+  "analysis_analyseGame": {
+    "message": "Analyse game"
+  },
+  "analysis_playVsEngine": {
+    "message": "Play vs engine"
+  },
+  "analysis_strength": {
+    "message": "Strength"
+  },
+  "analysis_accuracy": {
+    "message": "Accuracy"
+  },
+  "analysis_blunder": {
+    "message": "Blunder"
+  },
+  "analysis_mistake": {
+    "message": "Mistake"
+  },
+  "analysis_inaccuracy": {
+    "message": "Inaccuracy"
+  },
+  "analysis_good": {
+    "message": "Good"
+  },
+  "analysis_brilliant": {
+    "message": "Brilliant"
+  },
+  "analysis_heuristicNote": {
+    "message": "This judgement is a heuristic estimate, not a perfect calculation."
+  },
+  "analysis_evaluating": {
+    "message": "Evaluating…"
+  },
+  "analysis_cancel": {
+    "message": "Cancel"
+  },
+  "diagnostics_title": {
+    "message": "Diagnostics"
+  },
+  "diagnostics_platform": {
+    "message": "Detected platform"
+  },
+  "diagnostics_composer": {
+    "message": "Composer"
+  },
+  "diagnostics_sendButton": {
+    "message": "Send button"
+  },
+  "diagnostics_assistant": {
+    "message": "Assistant messages"
+  },
+  "diagnostics_timings": {
+    "message": "Timings"
+  },
+  "diagnostics_lastError": {
+    "message": "Last error"
+  },
+  "diagnostics_copyReport": {
+    "message": "Copy report"
+  },
+  "diagnostics_reportCopied": {
+    "message": "Diagnostics copied."
+  },
+  "diagnostics_none": {
+    "message": "None"
+  },
+  "diagnostics_matched": {
+    "message": "Matched: {selector}"
+  },
+  "diagnostics_notFound": {
+    "message": "Not found — using clipboard fallback"
+  },
+  "shortcuts_title": {
+    "message": "Keyboard shortcuts"
+  },
+  "shortcuts_newGame": {
+    "message": "New game: N"
+  },
+  "shortcuts_undo": {
+    "message": "Undo: U"
+  },
+  "shortcuts_flip": {
+    "message": "Flip board: F"
+  },
+  "shortcuts_copyPgn": {
+    "message": "Copy PGN: C"
+  },
+  "shortcuts_focusBoard": {
+    "message": "Focus board: B"
+  },
+  "shortcuts_hint": {
+    "message": "Hint: H"
+  },
+  "shortcuts_help": {
+    "message": "Help: ?"
+  },
+  "shortcuts_close": {
+    "message": "Close: Escape"
+  },
+  "clock_white": {
+    "message": "White"
+  },
+  "clock_black": {
+    "message": "Black"
+  },
+  "status_submitUnconfirmed": {
+    "message": "One send attempt was made but could not be confirmed. Check the pinned chat before copying or sending anything."
+  },
+  "status_checkChat": {
+    "message": "Check the chat"
+  },
+  "status_stillWaiting": {
+    "message": "Still waiting for {platform} to answer. The prompt stays sent — nothing is resent."
+  },
+  "status_loadCancelled": {
+    "message": "Loading cancelled — the current game was kept."
+  },
+  "delivery_title": {
+    "message": "What happened?"
+  },
+  "delivery_neverAttempted": {
+    "message": "The prompt was never sent — nothing was typed or clicked in the chat."
+  },
+  "delivery_attempted": {
+    "message": "One send was attempted but could not be confirmed. Check the pinned chat first; only copy or send something if the message is missing there."
+  },
+  "delivery_confirmed": {
+    "message": "The prompt was confirmed sent. Waiting for the chat to answer."
+  },
+  "delivery_answered": {
+    "message": "The chat replied and its move was accepted on the board."
+  },
+  "delivery_stale": {
+    "message": "An update from an older request arrived too late and was ignored."
+  },
+  "controls_confirmNewGame": {
+    "message": "Start a NEW game? The current game will end."
+  },
+  "controls_confirmReplaceGame": {
+    "message": "Replace the current game with this one?"
+  },
+  "controls_more": {
+    "message": "More"
+  },
+  "connections_change": {
+    "message": "Change"
+  },
+  "chip_pinned": {
+    "message": "{platform} — {title}"
+  },
+  "chip_none": {
+    "message": "No AI chat pinned"
+  },
+  "play_youPlay": {
+    "message": "You play {color}"
+  },
+  "firstRun_text": {
+    "message": "Pin one supported AI chat, pick a side, and make a move. The extension sends your position to that chat and plays its reply here. Settings holds everything else."
+  },
+  "firstRun_dismiss": {
+    "message": "Got it"
+  },
+  "help_title": {
+    "message": "How playing works"
+  },
+  "help_pinnedChat": {
+    "message": "The pinned AI chat plays your opponent: each legal move is sent there once, and only its new reply moves a piece."
+  },
+  "help_localTools": {
+    "message": "Hint and Analyse run a small local engine for suggestions only — they never play for the chat AI."
+  },
+  "help_rated": {
+    "message": "A rated match is separate: local Stockfish (UCI_Elo scale, not FIDE) plays one side against the chat AI, with its own history."
+  },
+  "match_banner": {
+    "message": "RATED · Chat AI plays {chatColor} · Stockfish plays {engineColor} (UCI_Elo {anchor})"
+  },
+  "match_ratedSection": {
+    "message": "Rated Stockfish match"
+  },
+  "settings_groupInterface": {
+    "message": "Interface"
+  },
+  "settings_interfaceDetail": {
+    "message": "Interface detail"
+  },
+  "settings_interfaceSimple": {
+    "message": "Simple (recommended)"
+  },
+  "settings_interfaceAdvanced": {
+    "message": "Advanced (technical details)"
+  },
+  "settings_boardOrientation": {
+    "message": "Board orientation"
+  },
+  "settings_orientationFollow": {
+    "message": "Follow the side you play"
+  },
+  "settings_orientationWhite": {
+    "message": "White at the bottom"
+  },
+  "settings_orientationBlack": {
+    "message": "Black at the bottom"
+  },
+  "settings_moveListFormat": {
+    "message": "Move list format"
+  },
+  "settings_moveListSan": {
+    "message": "SAN (e4, Nf3)"
+  },
+  "settings_moveListUci": {
+    "message": "UCI (e2e4, g1f3)"
+  },
+  "settings_moveInteraction": {
+    "message": "Move interaction"
+  },
+  "settings_interactionTapDrag": {
+    "message": "Tap and drag"
+  },
+  "settings_interactionTap": {
+    "message": "Tap only"
+  },
+  "settings_interactionDrag": {
+    "message": "Drag only"
+  },
+  "settings_confirmDestructive": {
+    "message": "Confirm before replacing a game or switching sides"
+  },
+  "settings_confirmDestructiveHint": {
+    "message": "Rated matches always ask for confirmation, even when this is off."
+  },
+  "settings_waitingReminder": {
+    "message": "“Still waiting” reminder"
+  },
+  "settings_reminderOff": {
+    "message": "Off"
+  },
+  "settings_reminderShort": {
+    "message": "After 30 seconds"
+  },
+  "settings_reminderMedium": {
+    "message": "After 1 minute"
+  },
+  "settings_reminderLong": {
+    "message": "After 2 minutes"
+  },
+  "settings_reminderHint": {
+    "message": "Shows a quiet reminder while a reply is pending. It never resends the prompt or changes the result."
+  },
+  "more_title": {
+    "message": "More"
+  },
+  "generic_ok": {
+    "message": "OK"
+  },
+  "generic_cancel": {
+    "message": "Cancel"
+  },
+  "generic_close": {
+    "message": "Close"
+  },
+  "generic_save": {
+    "message": "Save"
+  },
+  "generic_delete": {
+    "message": "Delete"
+  },
+  "generic_edit": {
+    "message": "Edit"
+  },
+  "generic_copy": {
+    "message": "Copy"
+  },
+  "generic_loading": {
+    "message": "Loading…"
+  },
+  "generic_error": {
+    "message": "Error"
+  },
+  "generic_success": {
+    "message": "Success"
+  },
+  "settings_waitingReminderOff": {
+    "message": "Off"
+  },
+  "settings_waitingReminder30s": {
+    "message": "After 30 seconds"
+  },
+  "settings_waitingReminder60s": {
+    "message": "After 1 minute"
+  },
+  "settings_waitingReminder2m": {
+    "message": "After 2 minutes"
+  },
+  "tools_title": {
+    "message": "Tools"
   }
 }

@@ -2,7 +2,7 @@
 
 > Play chess with Gemini, ChatGPT, Claude, Grok, Perplexity or Copilot in Chrome's side panel.
 
-**v0.5.0** is a zero-build Manifest V3 extension. You play one colour and the AI in your **pinned** chat plays the other. The local chess rules engine validates every move (including castling, en passant, promotion, checks and draws). The extension sends a FEN-based request to that one chat and reads the AI's _new_ reply. No account, API key, backend, analytics or telemetry is required.
+**v0.6.0** is a zero-build Manifest V3 extension. You play one colour and the AI in your **pinned** chat plays the other. The local chess rules engine validates every move (including castling, en passant, promotion, checks and draws). The extension sends a FEN-based request to that one chat and reads the AI's _new_ reply. No account, API key, backend, analytics or telemetry is required.
 
 ## Features
 
@@ -52,7 +52,7 @@ The opening/move/retry prompts include a FEN, side to move and a strict one-brac
 npm ci               # dev-only ESLint and Prettier; zero runtime npm dependencies
 npm test             # node:test, including perft and integration doubles
 npm run verify       # manifest, lint, formatting, tests
-npm run package      # build/ai-chess-companion-0.5.0.zip
+npm run package      # build/ai-chess-companion-0.6.0.zip
 ```
 
 The folder itself is loadable: **no bundler, CDN or runtime download**. `manifest.json` host lists come from `src/shared/platforms.js` (`npm run sync:manifest`). Tests assert full perft counts, board interaction and scroll isolation, CSP-safe markup, the web-accessible content module graph, absence of remote network APIs in that graph, the submit contract, observer provenance, pin/pause, UCI option/range parsing, **execution of the vendored Stockfish WASM bytes**, a real-game match flow and estimator math. See [development guide](docs/DEVELOPMENT.md) and [architecture](docs/ARCHITECTURE.md).

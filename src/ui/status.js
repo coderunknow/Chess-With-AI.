@@ -28,7 +28,58 @@ export const StatusAction = Object.freeze({
   RELOAD_TAB: "reload-tab",
   COPY_PROMPT: "copy-prompt",
   UNDO_DELETE: "undo-delete",
+  /** One send attempt was made but delivery is unconfirmed: inspect the chat first. */
+  CHECK_CHAT: "check-chat",
 });
+
+/**
+ * Coarse, privacy-safe delivery states shown under "What happened?".
+ * They never include prompt text or chat transcripts.
+ */
+export const DeliveryState = Object.freeze({
+  /** Validation failed before any click/Enter: nothing left the panel. */
+  NEVER: "never-attempted",
+  /** Exactly one submit event fired, but the host never confirmed it. */
+  UNCONFIRMED: "attempted-unconfirmed",
+  /** The host confirmed the message (echo or cleared composer). */
+  CONFIRMED: "confirmed-sent",
+  /** A matching assistant reply arrived and was accepted. */
+  ANSWERED: "answered",
+  /** A late callback belonged to an old request/game and was dropped. */
+  STALE: "stale-ignored",
+});
+
+/**
+ * Plain-language, privacy-safe description of what happened to the last
+ * prompt. Pure and unit-tested; contains no prompt text or transcripts.
+ *
+ * @param {{state: string}|null} delivery
+ * @param {(key:string, params?:Record<string,unknown>)=>string} [t]
+ * @returns {string}
+ */
+export function describeDelivery(delivery, t = null) {
+  if (!delivery) return "";
+  const tr =
+    t ||
+    ((key) => {
+      const fallback = {
+        [DeliveryState.NEVER]: "The prompt was never sent — nothing was typed or clicked in the chat.",
+        [DeliveryState.UNCONFIRMED]: "One send was attempted but could not be confirmed. Check the pinned chat first.",
+        [DeliveryState.CONFIRMED]: "The prompt was confirmed sent. Waiting for the chat to answer.",
+        [DeliveryState.ANSWERED]: "The chat replied and the move was accepted.",
+        [DeliveryState.STALE]: "An update from an older request arrived too late and was ignored.",
+      };
+      return fallback[key] || "";
+    });
+  const key = {
+    [DeliveryState.NEVER]: "delivery.neverAttempted",
+    [DeliveryState.UNCONFIRMED]: "delivery.attempted",
+    [DeliveryState.CONFIRMED]: "delivery.confirmed",
+    [DeliveryState.ANSWERED]: "delivery.answered",
+    [DeliveryState.STALE]: "delivery.stale",
+  }[delivery.state];
+  return key ? tr(key) : "";
+}
 
 /**
  * @typedef {object} StatusInput
@@ -45,7 +96,7 @@ export const StatusAction = Object.freeze({
  * @typedef {object} Status
  * @property {string} text
  * @property {'info'|'success'|'waiting'|'error'} kind
- * @property {''|'ask-ai'|'open-ai'|'retry'|'new-game'|'reload-tab'|'copy-prompt'|'undo-delete'} action
+ * @property {''|'ask-ai'|'open-ai'|'retry'|'new-game'|'reload-tab'|'copy-prompt'|'undo-delete'|'check-chat'} action
  */
 
 /**
@@ -78,6 +129,13 @@ export function describeStatus({
   // Helper to create status with translation fallback
   const make = (text, kind, action = StatusAction.NONE) => status(text, kind, action);
 
+  // A finished board always shows its real outcome. A late send failure,
+  // acknowledgement or copy/retry affordance must never replace the result —
+  // checkmate (or any terminal draw) happened on the board, not in transit.
+  if (session.isGameOver) {
+    return make(describeOutcome(session, tr), StatusKind.INFO, StatusAction.NEW_GAME);
+  }
+
   // If message is already a user-facing string (from t), use it directly
   // Detect actionable errors
   if (phase === "error" && message) {
@@ -99,10 +157,6 @@ export function describeStatus({
     const platform = connection.label || "the AI";
     const text = tr ? tr("status.sending", { platform }) : `Sending your move to ${platform}…`;
     return make(text, StatusKind.WAITING);
-  }
-
-  if (session.isGameOver) {
-    return make(describeOutcome(session, tr), StatusKind.INFO, StatusAction.NEW_GAME);
   }
 
   if (!connection.supported) {
@@ -196,6 +250,11 @@ export function describeOutcome(session, t = null) {
  * @returns {string} the primary action offered.
  */
 export function actionFor(session, connection, diagnosticsError = "") {
+  // Terminal outcomes outrank any transport recovery affordance: offering
+  // Copy/Ask after checkmate would ask the user to resend a finished game.
+  if (session.isGameOver) {
+    return StatusAction.NEW_GAME;
+  }
   if (diagnosticsError) {
     const lower = diagnosticsError.toLowerCase();
     if (lower.includes("input") || lower.includes("composer")) {
@@ -204,9 +263,6 @@ export function actionFor(session, connection, diagnosticsError = "") {
     if (lower.includes("content script") || lower.includes("reload")) {
       return StatusAction.RELOAD_TAB;
     }
-  }
-  if (session.isGameOver) {
-    return StatusAction.NEW_GAME;
   }
   if (!connection.supported) {
     return session.isWaitingForAi ? StatusAction.OPEN_AI : StatusAction.NONE;

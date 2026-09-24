@@ -109,6 +109,7 @@ test("the settings dialog covers every toggle the app reads", () => {
     "animationsEnabled",
     "autoRetry",
     "clockEnabled",
+    "confirmDestructive",
     "evalBarEnabled",
     "highlightLastMove",
     "persistGame",
@@ -116,6 +117,40 @@ test("the settings dialog covers every toggle the app reads", () => {
     "showLegalTargets",
     "soundEnabled",
   ]);
+});
+
+test("the compact Play view exposes progressive-disclosure controls", () => {
+  for (const id of [
+    "more-button",
+    "more-menu",
+    "more-settings",
+    "more-help",
+    "first-run",
+    "pin-chip",
+    "pin-chip-text",
+    "pin-change",
+    "side-line",
+    "moves-preview",
+    "rated-banner",
+    "what-happened",
+    "what-happened-detail",
+    "tools-section",
+    "help-section",
+  ]) {
+    assert.ok(idsIn(html).includes(id), `#${id} must exist in the compact Play view`);
+  }
+  // The advanced settings controls are present and wired by id.
+  for (const id of [
+    "settings-interface-detail",
+    "settings-board-orientation",
+    "settings-move-list-format",
+    "settings-move-interaction",
+    "settings-waiting-reminder",
+  ]) {
+    assert.ok(idsIn(html).includes(id), `#${id} must exist in the settings dialog`);
+  }
+  // Exactly one script entry pattern is unchanged; no inline handlers.
+  assert.ok(!/ onclick=/i.test(html), "inline onclick handlers are forbidden");
 });
 
 test("the promotion dialog offers exactly the four promotion pieces", () => {

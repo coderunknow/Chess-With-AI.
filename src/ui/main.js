@@ -171,6 +171,11 @@ try {
         generationWait: byId("settings-generation-wait"),
         soundVolume: byId("settings-sound-volume"),
         clockDuration: byId("settings-clock-duration"),
+        interfaceDetail: byIdOptional("settings-interface-detail"),
+        boardOrientation: byIdOptional("settings-board-orientation"),
+        moveListFormat: byIdOptional("settings-move-list-format"),
+        moveInteraction: byIdOptional("settings-move-interaction"),
+        waitingReminder: byIdOptional("settings-waiting-reminder"),
         toggles: [...document.querySelectorAll("[data-setting]")],
         reset: byIdOptional("settings-reset"),
       },
@@ -202,6 +207,39 @@ try {
 
   document.getElementById("open-settings")?.addEventListener("click", () => {
     document.getElementById("settings-dialog")?.showModal();
+  });
+
+  // Compact "More" menu: Settings + Help live behind one header control.
+  const moreButton = document.getElementById("more-button");
+  const moreMenu = document.getElementById("more-menu");
+  const closeMoreMenu = () => {
+    if (moreMenu) moreMenu.hidden = true;
+    moreButton?.setAttribute("aria-expanded", "false");
+  };
+  moreButton?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!moreMenu) return;
+    moreMenu.hidden = !moreMenu.hidden;
+    moreButton.setAttribute("aria-expanded", String(!moreMenu.hidden));
+    if (!moreMenu.hidden) {
+      moreMenu.querySelector("button")?.focus();
+    }
+  });
+  document.getElementById("more-settings")?.addEventListener("click", () => {
+    closeMoreMenu();
+    document.getElementById("settings-dialog")?.showModal();
+  });
+  document.getElementById("more-help")?.addEventListener("click", () => {
+    closeMoreMenu();
+    document.getElementById("shortcuts-dialog")?.showModal();
+  });
+  document.addEventListener("click", (event) => {
+    if (moreMenu && !moreMenu.hidden && !moreMenu.contains(/** @type {Node} */ (event.target))) {
+      closeMoreMenu();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeMoreMenu();
   });
 
   // Keyboard shortcuts help: "?" key

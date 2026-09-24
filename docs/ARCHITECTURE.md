@@ -1,4 +1,4 @@
-# Architecture — v0.5.0
+# Architecture — v0.6.0
 
 The checked-out repository **is** a zero-build Manifest V3 extension. Runtime npm dependencies: **zero**. `src/core` and `src/shared` are pure of DOM/`chrome.*`; the separately licensed Stockfish worker lives under `engine/stockfish`, not in the chess rules engine. There is no backend or telemetry.
 

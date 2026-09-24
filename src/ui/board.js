@@ -152,6 +152,8 @@ export class BoardView {
   #previousPieces = null;
   #flightCleanup = [];
   #ghost = null;
+  /** @type {'tap-drag'|'tap'|'drag'} pointer gesture style; keyboard is unaffected. */
+  #interaction = "tap-drag";
 
   /**
    * @param {HTMLElement} root container that receives the 8x8 grid.
@@ -159,12 +161,14 @@ export class BoardView {
    * @param {(square: number) => void} options.onSelect called when a square is activated.
    * @param {(from:number,to:number)=>void} [options.onDrop] called on drag drop
    * @param {boolean} [options.animationEnabled]
+   * @param {'tap-drag'|'tap'|'drag'} [options.interaction]
    */
-  constructor(root, { onSelect, onDrop = null, animationEnabled = true } = {}) {
+  constructor(root, { onSelect, onDrop = null, animationEnabled = true, interaction = "tap-drag" } = {}) {
     this.#root = root;
     this.#onSelect = onSelect;
     this.#onDrop = onDrop || onSelect;
     this.#animationEnabled = animationEnabled;
+    this.#interaction = interaction === "tap" || interaction === "drag" ? interaction : "tap-drag";
 
     // Click for activation without preceding pointer events (keyboard,
     // assistive tech). Pointer taps/drags are handled in #onPointerUp, which
@@ -378,6 +382,17 @@ export class BoardView {
     return Number.isInteger(square) ? square : null;
   }
 
+  /**
+   * Updates the pointer gesture style (tap-and-drag / tap-only / drag-only).
+   * Keyboard and assistive-tech activation are never affected.
+   *
+   * @param {'tap-drag'|'tap'|'drag'} mode
+   */
+  setInteraction(mode) {
+    this.#interaction = mode === "tap" || mode === "drag" ? mode : "tap-drag";
+    this.#endDrag();
+  }
+
   #squareAtPointer(event) {
     // Pointer capture sends move/up to the original button. Ask the document
     // what is actually underneath the coordinates (including off-board).
@@ -394,6 +409,8 @@ export class BoardView {
     // off-window) must not swallow the next genuine click.
     this.#suppressClick = false;
     if (this.isStatic()) return;
+    // Tap-only mode never starts a drag; the compatibility click selects once.
+    if (this.#interaction === "tap") return;
     if (event.button !== 0) return; // only left click / primary touch
     const square = this.#squareFromEvent(event);
     if (square === null) return;
@@ -473,6 +490,9 @@ export class BoardView {
     // selects exactly once (instead of select-then-deselect) and a drag
     // doesn't reselect its origin square afterwards.
     if (!moved) {
+      // Drag-only mode consumes plain taps; keyboard/AT clicks (no preceding
+      // pointer events) still reach the click handler above.
+      if (this.#interaction === "drag") return;
       // Treat as click
       this.#onSelect(to);
       return;

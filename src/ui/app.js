@@ -51,7 +51,7 @@ import {
 import { BoardView, describeBoard, squaresOfUci } from "./board.js";
 import { GameSession, MoveError } from "./game.js";
 import { HistoryView } from "./history.js";
-import { StatusAction, describeStatus } from "./status.js";
+import { DeliveryState, StatusAction, describeDelivery, describeStatus } from "./status.js";
 import { evaluate, formatEval } from "../core/eval.js";
 
 const log = createLogger("panel");
@@ -64,6 +64,8 @@ export const Phase = Object.freeze({
   IDLE: "idle",
   SENDING: "sending",
   AWAITING: "awaiting",
+  /** One submit attempt fired; delivery could not be confirmed. Not a proven failure. */
+  UNCONFIRMED: "unconfirmed",
   ERROR: "error",
 });
 
@@ -128,6 +130,8 @@ export class App {
   #matchSaving = false;
   #localEngineMode = false;
   #matchFinished = false;
+  #delivery = null;
+  #waitingReminderTimer = 0;
 
   /**
    * @param {object} refs DOM references resolved by `main.js`.
@@ -139,6 +143,7 @@ export class App {
     this.#boardView = new BoardView(refs.board, {
       onSelect: (square) => void this.selectSquare(square),
       onDrop: (from, to) => void this.handleDrop(from, to),
+      interaction: DEFAULT_SETTINGS.moveInteraction,
     });
     this.#historyView = new HistoryView({
       list: refs.moveList,
@@ -157,6 +162,7 @@ export class App {
     clearTimeout(this.#persistTimer);
     clearTimeout(this.#undoDeleteTimer);
     clearTimeout(this.#announceTimer);
+    clearTimeout(this.#waitingReminderTimer);
     clearInterval(this.#clockTimer);
     this.#stopStockfish();
     this.#engineWorker?.terminate();
@@ -237,6 +243,7 @@ export class App {
 
   #renderMatch() {
     const refs = this.#refs.match;
+    this.#renderPlayMeta(); // rated banner follows match lifecycle
     if (!refs) return;
     const t = this.#t || createTranslator("en");
     if (refs.engineStatus) {
@@ -363,6 +370,7 @@ export class App {
       this.#settings = mergeSettings(storedSettings);
       this.#engineLevel = this.#settings.engineLevel;
       this.#clockState = createClock(this.#settings.clockDurationMs);
+      this.#boardView.setInteraction?.(this.#settings.moveInteraction);
       if (this.#settings.paused) {
         this.#engineWorker?.terminate();
         this.#engineWorker = null;
@@ -452,6 +460,13 @@ export class App {
         void 0;
       }
 
+      // Dismissible first-run note (local only, never intrusive).
+      try {
+        this.#initFirstRun();
+      } catch {
+        void 0;
+      }
+
       try {
         await this.refreshConnection();
       } catch (e) {
@@ -515,6 +530,35 @@ export class App {
     }
   }
 
+  /** Shows the one-paragraph first-run note until the user dismisses it. */
+  #initFirstRun() {
+    const note = document.getElementById("first-run");
+    if (!note) return;
+    let dismissed = false;
+    try {
+      dismissed = Boolean(localStorage.getItem("ai-chess-companion-onboarded"));
+    } catch {
+      return; // storage unavailable — never nag without a way to persist
+    }
+    if (dismissed) return;
+    note.hidden = false;
+    const text = document.getElementById("first-run-text");
+    if (text) text.textContent = this.#t("firstRun.text");
+    const dismiss = document.getElementById("first-run-dismiss");
+    if (dismiss && !dismiss.dataset.bound) {
+      dismiss.dataset.bound = "1";
+      dismiss.textContent = this.#t("firstRun.dismiss");
+      dismiss.addEventListener("click", () => {
+        note.hidden = true;
+        try {
+          localStorage.setItem("ai-chess-companion-onboarded", "1");
+        } catch {
+          // ignore
+        }
+      });
+    }
+  }
+
   #cacheTheme() {
     try {
       const cache = {
@@ -536,6 +580,7 @@ export class App {
       document.body.dataset.boardTheme = this.#settings.boardTheme;
       document.body.dataset.fontScale = this.#settings.fontScale;
       document.body.dataset.density = this.#settings.density;
+      document.body.dataset.interface = this.#settings.interfaceDetail;
     } catch {
       void 0;
     }
@@ -639,6 +684,28 @@ export class App {
       "match-stop": "match.stop",
       "match-export": "match.export",
       "settings-hint": "settings.hint",
+      "tools-title": "tools.title",
+      "pin-change": "connections.change",
+      "more-button": "controls.more",
+      "more-title": "more.title",
+      "more-settings": "controls.settings",
+      "more-help": "shortcuts.title",
+      "first-run-text": "firstRun.text",
+      "first-run-dismiss": "firstRun.dismiss",
+      "delivery-title": "delivery.title",
+      "help-title": "help.title",
+      "help-pinned-chat": "help.pinnedChat",
+      "help-local-tools": "help.localTools",
+      "help-rated": "help.rated",
+      "rated-title": "match.ratedSection",
+      "settings-interface-group": "settings.groupInterface",
+      "settings-interface-detail-label": "settings.interfaceDetail",
+      "settings-orientation-label": "settings.boardOrientation",
+      "settings-move-format-label": "settings.moveListFormat",
+      "settings-move-interaction-label": "settings.moveInteraction",
+      "settings-waiting-reminder-label": "settings.waitingReminder",
+      "settings-confirm-destructive-hint": "settings.confirmDestructiveHint",
+      "settings-reminder-hint": "settings.reminderHint",
     };
     for (const [id, key] of Object.entries(staticLabels)) setText(id, key);
     for (const node of document.querySelectorAll("[data-i18n]")) {
@@ -854,6 +921,7 @@ export class App {
       this.#diagnostics = payload.diagnostics;
       this.#renderDiagnostics();
     }
+    this.#clearWaitingReminder();
     this.#expectedReplyId = null;
 
     if (payload.resigned) {
@@ -895,6 +963,9 @@ export class App {
       this.#lastIllegalReply = null;
       this.#clearSelection();
       this.#hintMove = null;
+      this.#delivery = { state: DeliveryState.ANSWERED };
+      this.#hideCopyPrompt();
+      this.#hideReloadTab();
       if (this.#match) this.#match.chatMoves += 1;
       this.#persist();
       this.#render();
@@ -902,6 +973,15 @@ export class App {
       this.#playSoundForMove(result.entry);
       this.#updateClockAfterMove();
       this.#announceMove(result.entry);
+      if (session.isGameOver) {
+        // Terminal board result: invalidate every in-flight callback of the
+        // request that produced this reply. A late acknowledgement, timeout or
+        // submit failure must not replace the checkmate (or draw) on screen.
+        this.#cancelReply();
+        this.#hideCopyPrompt();
+        this.#hideReloadTab();
+        this.#render();
+      }
       if (this.#match) {
         if (session.outcome.over) await this.#finishMatch(session.outcome.result, session.outcome.reason);
         else await this.#advanceMatch();
@@ -1031,6 +1111,14 @@ export class App {
 
   /** Starts a new game with the configured colour. */
   resetGame() {
+    if (
+      this.#settings.confirmDestructive &&
+      this.#session.plyCount > 0 &&
+      typeof globalThis.confirm === "function" &&
+      !globalThis.confirm(this.#t("controls.confirmNewGame"))
+    ) {
+      return;
+    }
     if (this.#match) this.#abortMatch(this.#t("match.unratedStopped"));
     this.#cancelReply();
     this.#matchFinished = false;
@@ -1043,6 +1131,9 @@ export class App {
     this.#clearSelection();
     this.#phase = Phase.IDLE;
     this.#message = this.#t("status.newGameGoodLuck");
+    this.#delivery = null;
+    this.#hideCopyPrompt();
+    this.#hideReloadTab();
     this.#hintMove = null;
     this.#evalScore = null;
     this.#persist();
@@ -1093,6 +1184,14 @@ export class App {
    */
   loadPgn(text) {
     if (this.#match) return { ok: false, error: this.#t("match.running") };
+    if (
+      this.#settings.confirmDestructive &&
+      this.#session.plyCount > 0 &&
+      typeof globalThis.confirm === "function" &&
+      !globalThis.confirm(this.#t("controls.confirmReplaceGame"))
+    ) {
+      return { ok: false, error: this.#t("status.loadCancelled") };
+    }
     this.#cancelReply();
     this.#matchFinished = false;
     this.#localEngineMode = false;
@@ -1172,6 +1271,24 @@ export class App {
       this.#applyI18n();
       this.#renderTabs();
       this.#renderLibrary();
+    }
+
+    if (previous.boardOrientation !== this.#settings.boardOrientation) {
+      // An explicit orientation choice supersedes any manual Flip override;
+      // the Flip button then continues to work as a temporary reversal.
+      this.#flipOverride = null;
+    }
+
+    if (previous.moveInteraction !== this.#settings.moveInteraction) {
+      this.#boardView.setInteraction?.(this.#settings.moveInteraction);
+    }
+
+    if (previous.waitingReminderMs !== this.#settings.waitingReminderMs) {
+      if (this.#phase === Phase.AWAITING && this.#expectedReplyId !== null) {
+        this.#scheduleWaitingReminder();
+      } else {
+        this.#clearWaitingReminder();
+      }
     }
 
     if (previous.paused !== this.#settings.paused) {
@@ -1261,7 +1378,15 @@ export class App {
     this.#announceMove(result.entry);
 
     if (session.isGameOver) {
+      // The human's move ended the game: no new chess prompt may be created,
+      // typed, copied or sent — and any obsolete recovery affordance from an
+      // earlier request must disappear with the terminal result.
       this.#phase = Phase.IDLE;
+      this.#message = "";
+      this.#delivery = null;
+      this.#clearWaitingReminder();
+      this.#hideCopyPrompt();
+      this.#hideReloadTab();
       this.#render();
       return;
     }
@@ -1381,6 +1506,8 @@ export class App {
     const epoch = this.#retryEpoch;
     const tabId = this.#connection.tabId;
     const platformId = this.#connection.platform;
+    /** Assigned once the bridge call is issued; null if it never started. */
+    let requestId = null;
     if (!match) this.#busy = true;
     try {
       // An earlier cancellation MUST arrive before this new request. Otherwise
@@ -1413,10 +1540,12 @@ export class App {
         return false;
       }
 
-      const requestId = ++this.#requestCounter;
+      requestId = ++this.#requestCounter;
       this.#expectedReplyId = requestId;
       this.#lastPrompt = prompt;
       this.#phase = Phase.SENDING;
+      this.#delivery = null;
+      this.#clearWaitingReminder();
       this.#message =
         retry > 0
           ? this.#t("status.retryReason", { attempt: retry, reason: reasonText })
@@ -1434,8 +1563,36 @@ export class App {
           rejectedMoves: this.#session.rejectedMoves,
         }),
       );
-      if (epoch !== this.#retryEpoch) return false;
+      // ---- Late-response guards -------------------------------------------
+      // Every response (success, failure, unconfirmed) must prove it still
+      // belongs to the LIVE request before touching the UI:
+      // - epoch changed  → pause/unpin/new game/undo/side switch cancelled it;
+      // - request id gone → a reply already resolved (or finished) this request;
+      // - game over      → a terminal result outranks any transport message.
+      if (epoch !== this.#retryEpoch) {
+        this.#delivery = { state: DeliveryState.STALE };
+        return false;
+      }
+      if (this.#expectedReplyId !== requestId || this.#session.isGameOver) {
+        // A fast AI reply (possibly a checkmate) or a terminal human result
+        // won the race. A late acknowledgement/failure must not overwrite it
+        // and must not trigger any new prompt.
+        if (this.#delivery?.state !== DeliveryState.ANSWERED) this.#delivery = { state: DeliveryState.STALE };
+        return true;
+      }
       const response = normaliseResponse(raw);
+      if (raw?.result === "submit-unconfirmed") {
+        // ONE submit event fired; the host did not confirm it. Keep the
+        // request pending (the content watcher still owns the reply), tell the
+        // user to CHECK the chat, and offer Copy only as a deliberate,
+        // secondary recovery — never "send it manually" as if nothing went.
+        if (raw?.diagnostics) {
+          this.#diagnostics = raw.diagnostics;
+          this.#renderDiagnostics();
+        }
+        this.#markUnconfirmedSend(requestId);
+        return false;
+      }
       if (!response.ok || this.#settings.paused) {
         if (this.#expectedReplyId === requestId) this.#expectedReplyId = null;
         this.#phase = Phase.ERROR;
@@ -1449,6 +1606,7 @@ export class App {
         this.#message = this.#settings.paused
           ? this.#t("status.paused")
           : this.#t(errorKeys[raw?.result] || "status.sendFailure", { detail: response.error });
+        this.#delivery = { state: DeliveryState.NEVER, reason: raw?.result || "runtime" };
         this.#diagnostics = raw?.diagnostics || null;
         this.#renderDiagnostics();
         if (raw?.result === "generation-timeout") {
@@ -1471,6 +1629,8 @@ export class App {
       // AWAITING on top of its accepted reply or the next serialized request.
       if (this.#expectedReplyId !== requestId) return true;
       this.#phase = Phase.AWAITING;
+      this.#delivery = { state: DeliveryState.CONFIRMED, requestId };
+      this.#scheduleWaitingReminder();
       if (raw?.manual) {
         this.#message = raw.copied ? this.#t("status.manualCopied") : this.#t("status.manualSend");
         this.#showCopyPrompt(prompt);
@@ -1482,11 +1642,19 @@ export class App {
       this.#renderDiagnostics();
       return true;
     } catch (error) {
-      if (epoch !== this.#retryEpoch) return false;
-      this.#expectedReplyId = null;
+      if (epoch !== this.#retryEpoch) {
+        this.#delivery = { state: DeliveryState.STALE };
+        return false;
+      }
+      if (this.#expectedReplyId !== requestId || this.#session.isGameOver) {
+        if (this.#delivery?.state !== DeliveryState.ANSWERED) this.#delivery = { state: DeliveryState.STALE };
+        return true;
+      }
+      if (requestId !== null) this.#expectedReplyId = null;
       const detail = describeRuntimeError(error) || String(error);
       this.#phase = Phase.ERROR;
       this.#message = this.#t("status.couldNotReach", { detail });
+      this.#delivery = { state: DeliveryState.NEVER, reason: "runtime" };
       if (detail.toLowerCase().includes("receiving end") || detail.toLowerCase().includes("could not establish")) {
         this.#message = this.#t("status.contentMissing");
         this.#showReloadTab();
@@ -1499,6 +1667,45 @@ export class App {
     }
   }
 
+  /** Applies the "attempted but unconfirmed" state without clearing the request. */
+  #markUnconfirmedSend(requestId) {
+    if (this.#expectedReplyId !== requestId || this.#session.isGameOver) return;
+    // The matching user echo may have confirmed the send while the response
+    // was in transit — never downgrade AWAITING back to unconfirmed.
+    if (this.#phase === Phase.AWAITING) return;
+    this.#phase = Phase.UNCONFIRMED;
+    this.#message = this.#t("status.submitUnconfirmed");
+    this.#delivery = { state: DeliveryState.UNCONFIRMED, requestId };
+    this.#showCopyPrompt(this.#lastPrompt); // deliberate recovery, after "check the chat"
+    this.#render();
+  }
+
+  #scheduleWaitingReminder() {
+    this.#clearWaitingReminder();
+    const ms = this.#settings.waitingReminderMs;
+    if (!ms) return;
+    // Bare setTimeout so tests can drive it with mock timers; in the browser
+    // this is the same function. The callback re-checks every precondition —
+    // it can never resend, fabricate a result, or speak over a finished game.
+    this.#waitingReminderTimer = setTimeout(() => {
+      this.#waitingReminderTimer = 0;
+      if (
+        this.#phase === Phase.AWAITING &&
+        this.#expectedReplyId !== null &&
+        !this.#session.isGameOver &&
+        !this.#settings.paused
+      ) {
+        this.#message = this.#t("status.stillWaiting", { platform: this.#connection.label || "the AI" });
+        this.#render();
+      }
+    }, ms);
+  }
+
+  #clearWaitingReminder() {
+    clearTimeout(this.#waitingReminderTimer);
+    this.#waitingReminderTimer = 0;
+  }
+
   /** End the single expected reply without unloading its content script. */
   #cancelReply() {
     this.#expectedReplyId = null;
@@ -1506,6 +1713,7 @@ export class App {
     this.#retryToken += 1;
     this.#retryPending = false;
     this.#busy = false;
+    this.#clearWaitingReminder();
     const tabId = this.#connection.tabId;
     if (Number.isInteger(tabId)) {
       this.#cancelPending = this.#cancelPending
@@ -1731,6 +1939,13 @@ export class App {
       () => void this.#copyText(this.#session.fen, this.#t ? this.#t("status.fenCopied") : "FEN copied."),
     );
     controls.statusAction.addEventListener("click", () => void this.#runStatusAction());
+    document.getElementById("pin-change")?.addEventListener("click", () => {
+      // The chip's explicit Change action: open the full picker (fresh list).
+      void this.refreshConnection().then(() => {
+        if (platformBanner.root) platformBanner.root.open = true;
+        platformBanner.list?.querySelector?.("button")?.focus?.();
+      });
+    });
     platformBanner.refresh?.addEventListener("click", () => void this.refreshConnection());
     platformBanner.unpin?.addEventListener("click", () => void this.unpinTab());
     platformBanner.list?.addEventListener("click", (event) => {
@@ -1848,6 +2063,15 @@ export class App {
     settingsDialog.controls.sendMode?.addEventListener("change", (event) => {
       void this.updateSettings({ sendMode: event.target.value });
     });
+    const enumSetting = (element, key) =>
+      element?.addEventListener("change", (event) => {
+        void this.updateSettings({ [key]: event.target.value });
+      });
+    enumSetting(settingsDialog.controls.interfaceDetail, "interfaceDetail");
+    enumSetting(settingsDialog.controls.boardOrientation, "boardOrientation");
+    enumSetting(settingsDialog.controls.moveListFormat, "moveListFormat");
+    enumSetting(settingsDialog.controls.moveInteraction, "moveInteraction");
+    numberSetting(settingsDialog.controls.waitingReminder, "waitingReminderMs");
 
     for (const input of settingsDialog.controls.toggles) {
       input.addEventListener("change", () => {
@@ -1965,25 +2189,48 @@ export class App {
         sender?.tab?.id !== this.#pin.tabId ||
         message.requestId !== this.#expectedReplyId ||
         this.#expectedReplyId === null ||
-        (this.#phase !== Phase.AWAITING && this.#phase !== Phase.SENDING)
-      )
+        (this.#phase !== Phase.AWAITING && this.#phase !== Phase.SENDING && this.#phase !== Phase.UNCONFIRMED)
+      ) {
+        // A dropped CONTENT_STATUS error is worth surfacing as "stale" while
+        // the game is still live; a finished board simply ignores it.
+        if (message?.type === MessageType.CONTENT_STATUS && message.error && !this.#session.isGameOver) {
+          this.#delivery = { state: DeliveryState.STALE };
+        }
         return;
+      }
       if (message.diagnostics) {
         this.#diagnostics = message.diagnostics;
         this.#renderDiagnostics();
       }
       if (message.type === MessageType.AI_MOVE) {
+        if (this.#session.isGameOver) return; // terminal results are never re-opened
         void this.handleAiMove(message);
         return;
       }
+      // A finished game never accepts further CONTENT_STATUS updates.
+      if (this.#session.isGameOver) return;
       if (message.state === "generation-wait") {
         this.#message = this.#t("status.waitGeneration", { platform: this.#connection.label });
         this.#render();
+      } else if (message.state === "submit-unconfirmed") {
+        this.#markUnconfirmedSend(message.requestId);
+      } else if (message.state === "prompt-echoed" || message.state === "prompt-sent") {
+        // The host confirmed delivery (fresh echo / acknowledgement). Move
+        // unconfirmed → awaiting without issuing any new submit.
+        if (this.#expectedReplyId === message.requestId && this.#phase !== Phase.AWAITING) {
+          this.#phase = Phase.AWAITING;
+          this.#message = "";
+          this.#delivery = { state: DeliveryState.CONFIRMED, requestId: message.requestId };
+          this.#hideCopyPrompt();
+          this.#scheduleWaitingReminder();
+          this.#render();
+        }
       } else if (message.state === "no-move") {
         void this.handleAiMove({ noMove: true, repeated: message.repeated, text: message.text });
-      } else if (message.error) {
+      } else if (message.error && this.#phase !== Phase.UNCONFIRMED) {
         this.#phase = Phase.ERROR;
         this.#message = this.#t("status.sendFailure", { detail: message.error });
+        this.#delivery = { state: DeliveryState.NEVER, reason: "content" };
         this.#showCopyPrompt(this.#lastPrompt);
         this.#render();
       }
@@ -2074,11 +2321,20 @@ export class App {
 
   #applyFenFromDialog() {
     if (this.#match) return;
+    const { fenDialog } = this.#refs;
+    if (
+      this.#settings.confirmDestructive &&
+      this.#session.plyCount > 0 &&
+      typeof globalThis.confirm === "function" &&
+      !globalThis.confirm(this.#t("controls.confirmReplaceGame"))
+    ) {
+      fenDialog?.root?.close?.();
+      return;
+    }
     this.#cancelReply();
     this.#matchFinished = false;
     this.#localEngineMode = false;
     this.#lastIllegalReply = null;
-    const { fenDialog } = this.#refs;
     if (!fenDialog?.input) return;
     const fen = fenDialog.input.value.trim();
     const result = this.#session.setFen(fen);
@@ -2211,6 +2467,9 @@ export class App {
       case StatusAction.RELOAD_TAB:
         await this.#reloadActiveTab();
         break;
+      case StatusAction.CHECK_CHAT:
+        await this.#focusPinnedTab();
+        break;
       case StatusAction.COPY_PROMPT:
         await this.#copyText(this.#lastPrompt, this.#t ? this.#t("status.promptCopied") : "Prompt copied.");
         break;
@@ -2221,6 +2480,21 @@ export class App {
         break;
       default:
         break;
+    }
+  }
+
+  /** Focuses the pinned chat so the user can CHECK it before any resend. */
+  async #focusPinnedTab() {
+    const tabId = this.#pin?.tabId ?? this.#connection.tabId;
+    if (!Number.isInteger(tabId)) {
+      if (this.#refs.platformBanner.root) this.#refs.platformBanner.root.open = true;
+      return;
+    }
+    try {
+      await chrome.tabs.update?.(tabId, { active: true });
+    } catch (error) {
+      log.debug("could not focus the pinned tab", describeRuntimeError(error));
+      if (this.#refs.platformBanner.root) this.#refs.platformBanner.root.open = true;
     }
   }
 
@@ -2245,16 +2519,45 @@ export class App {
 
   /** @returns {boolean} whether the board is drawn from Black's side. */
   #effectiveFlipped() {
-    return this.#flipOverride ?? this.#session.playerColor === "b";
+    if (this.#flipOverride !== null) return this.#flipOverride;
+    switch (this.#settings.boardOrientation) {
+      case "white":
+        return false;
+      case "black":
+        return true;
+      default:
+        return this.#session.playerColor === "b";
+    }
   }
 
   /** @returns {ReturnType<typeof describeStatus>} */
   #status() {
+    // Terminal results outrank everything, including pause and late errors:
+    // a finished game must always read as finished.
+    if (this.#session.isGameOver) {
+      if (this.#matchFinished) return { text: this.#message, kind: "info", action: StatusAction.NEW_GAME };
+      return describeStatus({
+        session: this.#session,
+        connection: this.#connection,
+        phase: Phase.IDLE,
+        message: "",
+        t: this.#t,
+      });
+    }
     if (this.#settings.paused) return { text: this.#t("status.paused"), kind: "info", action: StatusAction.NONE };
     if (this.#lastIllegalReply && this.#phase === Phase.ERROR) {
       return { text: this.#message, kind: "error", action: StatusAction.RETRY };
     }
     if (this.#matchFinished) return { text: this.#message, kind: "info", action: StatusAction.NEW_GAME };
+    if (this.#phase === Phase.UNCONFIRMED && this.#expectedReplyId !== null) {
+      // One attempt fired, delivery uncertain: CHECK first, Copy only second.
+      // No Ask-again — the request is still live and may yet be answered.
+      return {
+        text: this.#message || this.#t("status.submitUnconfirmed"),
+        kind: "error",
+        action: StatusAction.CHECK_CHAT,
+      };
+    }
     if (this.#phase === Phase.AWAITING && this.#expectedReplyId !== null) {
       if (this.#settings.sendMode === "manual") {
         return {
@@ -2416,6 +2719,62 @@ export class App {
     }
   }
 
+  /**
+   * Updates the Play-first view extras: pinned-chat chip, side line, compact
+   * move preview, rated banner and the "What happened?" disclosure. All
+   * elements are optional so the Node harness (and older fixtures) work.
+   */
+  #renderPlayMeta() {
+    const t = this.#t;
+    const session = this.#session;
+    const chip = document.getElementById("pin-chip");
+    const chipText = document.getElementById("pin-chip-text");
+    if (chip && chipText) {
+      chipText.textContent = this.#pin
+        ? t("chip.pinned", {
+            platform: this.#connection.label,
+            title: this.#pin.title || `#${this.#pin.tabId}`,
+          })
+        : t("chip.none");
+      chip.classList.toggle("is-pinned", Boolean(this.#pin));
+      chip.classList.toggle("is-empty", !this.#pin);
+    }
+    const sideLine = document.getElementById("side-line");
+    if (sideLine) {
+      const colorName = t(session.playerColor === "w" ? "clock.white" : "clock.black");
+      sideLine.textContent = t("play.youPlay", { color: colorName });
+    }
+    const preview = document.getElementById("moves-preview");
+    if (preview) {
+      if (session.plyCount === 0) {
+        preview.textContent = t("moves.empty");
+        preview.classList.add("is-empty");
+      } else {
+        preview.classList.remove("is-empty");
+        const raw =
+          this.#settings.moveListFormat === "uci"
+            ? session.history.map((entry) => entry.uci).join(" ")
+            : session.moveListText;
+        preview.textContent = raw.length > 96 ? `… ${raw.slice(-95)}` : raw;
+      }
+    }
+    const rated = document.getElementById("rated-banner");
+    if (rated) {
+      rated.hidden = !this.#match;
+      if (this.#match) {
+        rated.textContent = t("match.banner", {
+          chatColor: t(this.#match.aiColor === "w" ? "clock.white" : "clock.black"),
+          engineColor: t(this.#match.engineColor === "w" ? "clock.white" : "clock.black"),
+          anchor: this.#match.anchor,
+        });
+      }
+    }
+    const what = document.getElementById("what-happened");
+    const whatDetail = document.getElementById("what-happened-detail");
+    if (what) what.hidden = !this.#delivery;
+    if (whatDetail) whatDetail.textContent = describeDelivery(this.#delivery, t);
+  }
+
   #renderEval() {
     const evalBar = this.#refs.evalBar;
     const evalFill = this.#refs.evalFill;
@@ -2484,6 +2843,14 @@ export class App {
     document.body.dataset.boardTheme = this.#settings.boardTheme;
     document.body.dataset.fontScale = this.#settings.fontScale;
     document.body.dataset.density = this.#settings.density;
+    document.body.dataset.interface = this.#settings.interfaceDetail;
+
+    const newControls = settingsDialog.controls;
+    if (newControls.interfaceDetail) newControls.interfaceDetail.value = this.#settings.interfaceDetail;
+    if (newControls.boardOrientation) newControls.boardOrientation.value = this.#settings.boardOrientation;
+    if (newControls.moveListFormat) newControls.moveListFormat.value = this.#settings.moveListFormat;
+    if (newControls.moveInteraction) newControls.moveInteraction.value = this.#settings.moveInteraction;
+    if (newControls.waitingReminder) newControls.waitingReminder.value = String(this.#settings.waitingReminderMs);
 
     for (const input of settingsDialog.controls.toggles) {
       const key = input.dataset.setting;
@@ -2582,12 +2949,20 @@ export class App {
 
   async openLibraryGame(id) {
     if (!this.#library || this.#match) return;
+    const game = this.#library.games.find((g) => g.id === id);
+    if (!game) return;
+    if (
+      this.#settings.confirmDestructive &&
+      this.#session.plyCount > 0 &&
+      typeof globalThis.confirm === "function" &&
+      !globalThis.confirm(this.#t("controls.confirmReplaceGame"))
+    ) {
+      return;
+    }
     this.#cancelReply();
     this.#matchFinished = false;
     this.#localEngineMode = false;
     this.#lastIllegalReply = null;
-    const game = this.#library.games.find((g) => g.id === id);
-    if (!game) return;
 
     try {
       const session = GameSession.fromSnapshot(
@@ -2790,6 +3165,7 @@ export class App {
       return false;
     }
     if (
+      this.#settings.confirmDestructive &&
       this.#session.plyCount > 0 &&
       typeof globalThis.confirm === "function" &&
       !globalThis.confirm(this.#t("controls.confirmSide"))
@@ -3146,6 +3522,7 @@ export class App {
   async playVsEngine() {
     if (this.#busy || this.#match || this.#settings.paused) return;
     if (
+      this.#settings.confirmDestructive &&
       this.#session.plyCount > 0 &&
       typeof globalThis.confirm === "function" &&
       !globalThis.confirm(this.#t("analysis.confirmEngine"))
@@ -3183,6 +3560,7 @@ const ACTION_KEYS = Object.freeze({
   [StatusAction.RELOAD_TAB]: "status.reloadTab",
   [StatusAction.COPY_PROMPT]: "status.copyPrompt",
   [StatusAction.UNDO_DELETE]: "library.undo",
+  [StatusAction.CHECK_CHAT]: "status.checkChat",
 });
 
 /**

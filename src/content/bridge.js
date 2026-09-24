@@ -44,7 +44,10 @@ export const SendResult = Object.freeze({
   NO_INPUT: "input-missing",
   GENERATION_TIMEOUT: "generation-timeout",
   TYPE_FAILED: "type-failed",
+  /** Validation failed before any click/Enter: the system KNOWS nothing was sent. */
   SUBMIT_FAILED: "submit-failed",
+  /** One submit event fired, but the host never confirmed delivery. NOT a proof of failure. */
+  SUBMIT_UNCONFIRMED: "submit-unconfirmed",
   VERIFY_FAILED: "verify-failed",
 });
 
@@ -60,6 +63,8 @@ export class ChatBridge {
   #hostname;
   #inFlight = false;
   #cancelled = false;
+  /** True once ONE submit event (click or Enter) may have reached the page. */
+  #attemptedSubmit = false;
 
   constructor({
     hostname = globalThis.location?.hostname || "",
@@ -182,6 +187,7 @@ export class ChatBridge {
     }
     this.#inFlight = true; // includes the entire generation-wait window
     this.#cancelled = false;
+    this.#attemptedSubmit = false;
     const totalStart = Date.now();
     this.#diagnostics.reset();
     this.#diagnostics.setVerification({ fullStringEquality: false, secondEventSuppressed: false });
@@ -237,14 +243,35 @@ export class ChatBridge {
       const submitStart = Date.now();
       const method = await this.#submit(beforeSubmit.input, prompt, onSubmit);
       this.#diagnostics.setTimings({ submit: Date.now() - submitStart, total: Date.now() - totalStart });
-      if (method) this.#diagnostics.setSubmitMethod(method);
-      if (!method) {
+      // "contradicted" = a DIFFERENT new user message appeared while our
+      // prompt never did: the transcript proves this prompt did not go out.
+      // Fail closed with copy recovery (unlike unconfirmed below).
+      if (method === "contradicted") {
         return this.#failure(
           SendResult.SUBMIT_FAILED,
-          "Submission could not be confirmed. Copy the prompt; do not retry automatically.",
+          "The page shows a different new message instead of this prompt. It was not sent — copy it and send it yourself.",
         );
       }
-      return { ok: true, method, error: "", result: SendResult.OK, diagnostics: this.#diagnostics.report };
+      if (method) {
+        this.#diagnostics.setSubmitMethod(method);
+        return { ok: true, method, error: "", result: SendResult.OK, diagnostics: this.#diagnostics.report };
+      }
+      // The submit outcome depends on WHETHER a submit event was dispatched:
+      // - never dispatched → we know nothing was sent (copy is safe);
+      // - dispatched but unconfirmed → delivery is UNCERTAIN. Claiming
+      //   "could not submit" here is exactly the checkmate bug: a host that
+      //   renders its user echo late (or transforms the text, or clears the
+      //   composer after the settle window) DID receive the one click.
+      if (this.#attemptedSubmit) {
+        return this.#failure(
+          SendResult.SUBMIT_UNCONFIRMED,
+          "One send attempt was made but could not be confirmed. Check the pinned chat before copying or sending anything.",
+        );
+      }
+      return this.#failure(
+        SendResult.SUBMIT_FAILED,
+        "Nothing was submitted — the page accepted no send action. Copy the prompt and send it yourself.",
+      );
     } finally {
       this.#inFlight = false;
     }
@@ -286,6 +313,10 @@ export class ChatBridge {
       if (!isSendControl(button) || isStopControl(button)) return "";
       this.#diagnostics.setSubmitMethod("button");
       this.#diagnostics.setVerification({ secondEventSuppressed: true });
+      // From this point on, the page MAY have received our one submit — a
+      // later failure to observe confirmation must never be reported as
+      // "nothing was sent".
+      this.#attemptedSubmit = true;
       try {
         onSubmit();
         button.click();
@@ -294,13 +325,17 @@ export class ChatBridge {
         log.warn("send button click threw; not resubmitting", error);
         return "";
       }
-      return (await this.#confirmed(input, prompt, before)) ? "button" : "";
+      const verdict = await this.#confirmed(input, prompt, before);
+      if (verdict === "confirmed") return "button";
+      if (verdict === "contradicted") return "contradicted";
+      return "";
     }
 
     // Enter is permitted exactly once, only with a full prompt and no Stop.
     if (this.#cancelled || this.findGenerationState().generating || !verifyComposerContains(input, prompt)) return "";
     this.#diagnostics.setSubmitMethod("enter");
     this.#diagnostics.setVerification({ secondEventSuppressed: true });
+    this.#attemptedSubmit = true;
     try {
       onSubmit();
       pressEnter(input);
@@ -308,26 +343,47 @@ export class ChatBridge {
       log.warn("Enter submit failed; not retrying", error);
       return "";
     }
-    return (await this.#confirmed(input, prompt, before)) ? "enter" : "";
+    const verdict = await this.#confirmed(input, prompt, before);
+    if (verdict === "confirmed") return "enter";
+    if (verdict === "contradicted") return "contradicted";
+    return "";
   }
 
+  /**
+   * Watches the transcript after ONE submit attempt.
+   *
+   * @returns {Promise<'confirmed'|'contradicted'|'unconfirmed'>} confirmed —
+   *   our echo is present (or the composer cleared with no contradiction);
+   *   contradicted — a different new user message appeared instead (our
+   *   prompt is provably absent); unconfirmed — no evidence either way.
+   */
   async #confirmed(input, prompt, before) {
     const started = Date.now();
+    // Hosts may REPLACE the composer element while confirming. A stale,
+    // detached composer holding the old text must not mask the fresh empty
+    // one the site just rendered.
+    const composerEmpty = () => {
+      const current = input?.isConnected === false ? this.findInput() : input;
+      return current ? isComposerEmpty(current) : false;
+    };
+    const matchesPrompt = (node) => collapseWhitespace(textOf(node)) === collapseWhitespace(prompt);
     for (;;) {
       const messages = newUserMessages(document, this.#userSelectors, before, prompt);
-      if (messages.length > 1) return false;
-      const confirmed = messages.length === 1 && collapseWhitespace(textOf(messages[0])) === collapseWhitespace(prompt);
-      if (confirmed || isComposerEmpty(input)) {
+      if (messages.length > 1) return "contradicted";
+      const seenPrompt = messages.length === 1 && matchesPrompt(messages[0]);
+      if (seenPrompt || composerEmpty()) {
         await delay(USER_MESSAGE_TIMEOUT_MS);
         const after = newUserMessages(document, this.#userSelectors, before, prompt);
         // A cleared composer is useful confirmation only when no contradicting
-        // user message exists. A different user message means the click may
-        // have sent something else; never report that as our successful send.
-        return after.length === 0
-          ? isComposerEmpty(input)
-          : after.length === 1 && collapseWhitespace(textOf(after[0])) === collapseWhitespace(prompt);
+        // user message exists. A different user message means the transcript
+        // does not contain our prompt — fail closed as "not sent".
+        if (after.length === 0) return composerEmpty() ? "confirmed" : "unconfirmed";
+        if (after.length === 1) return matchesPrompt(after[0]) ? "confirmed" : "contradicted";
+        return "contradicted";
       }
-      if (Date.now() - started >= this.submitSettleMs) return false;
+      // No transcript evidence and a non-empty composer: wait out the settle
+      // window (late echoes arrive), then report unconfirmed — NOT "failed".
+      if (Date.now() - started >= this.submitSettleMs) return "unconfirmed";
       await delay(80);
     }
   }
