@@ -11,7 +11,7 @@ export const APP_NAME = "AI Chess Companion";
 export const APP_ID = "ai-chess-companion";
 
 /** Current extension version. Kept in sync with `manifest.json` by CI. */
-export const APP_VERSION = "0.2.0";
+export const APP_VERSION = "0.2.1";
 
 /** Repository URL, referenced from the docs and the manifest. */
 export const REPOSITORY_URL = "https://github.com/coderunknow/Chess-With-AI";

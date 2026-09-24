@@ -199,9 +199,16 @@ body[data-font-scale="large"] {
   font-size: 15px;
 }
 
-/* Prevent flash: hide until theme applied (inline script removes) */
+/* Prevent flash: keep visible but avoid FOUC — theme-init.js removes class early.
+   Previously visibility:hidden caused black screen when CSP blocked inline scripts. */
 body.theme-loading {
-  visibility: hidden;
+  /* no longer hidden; theme-init.js handles background to reduce flash */
+  opacity: 1;
+}
+
+/* Safety: if theme-init.js fails, ensure body becomes visible quickly */
+body.theme-loading .panel {
+  opacity: 0.99;
 }
 
 /* Panel */

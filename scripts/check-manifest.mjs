@@ -91,7 +91,11 @@ for (const file of new Set(referencedFiles)) {
 
 // --- side panel module graph ------------------------------------------------------
 const panelSource = await (await import("node:fs/promises")).readFile(path.join(ROOT, "sidepanel.html"), "utf8");
-const panelEntry = /<script[^>]+src="([^"]+)"/.exec(panelSource)?.[1];
+// v0.2.1-patch: sidepanel now has theme-init.js (classic) + main.js (module). Find the module entry.
+const moduleMatch =
+  /<script[^>]*type="module"[^>]*src="([^"]+)"/.exec(panelSource) ||
+  /<script[^>]*src="([^"]+)"[^>]*type="module"/.exec(panelSource);
+const panelEntry = moduleMatch?.[1] || /<script[^>]+src="([^"]+)"/.exec(panelSource)?.[1];
 check(Boolean(panelEntry), "sidepanel.html does not load a module");
 if (panelEntry) {
   check(await fileExists(panelEntry), `sidepanel.html references a missing script: ${panelEntry}`);

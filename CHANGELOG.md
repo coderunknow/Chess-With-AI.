@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-09-24
+
+### Fixed
+
+- **Black screen (critical)**: sidepanel had inline <script> blocked by MV3 CSP (script-src 'self'), leaving body.theme-loading {visibility:hidden} permanently. Fixed by:
+  - Moving theme flash logic to external `src/ui/theme-init.js` (CSP-safe, no inline)
+  - Removing inline scripts from sidepanel.html (0 inline, 2 external: theme-init.js + main.js)
+  - Changing theme.css: theme-loading no longer hides body (opacity:1) with safety timeout
+  - Adding defensive `forceVisible()` in main.js (error/rejection handlers, DOMContentLoaded, 1.5s timeout)
+  - Hardening App.start() with try/catch around settings/library/snapshot/render/connection, corrupt snapshot auto-reset, and final unhide in finally
+  - App.applyTheme() now also removes theme-loading and clears document background
+  - Bootstrap try/catch shows error in status instead of blank screen
+
+### Changed
+
+- sidepanel.html: CSP-compliant, no inline scripts
+- theme-init.js: new early loader, handles system theme, caches boardTheme/fontScale/density, safety net 1s unhide
+- main.js: resilient bootstrap, status error display on failure
+- app.js: robust start() with granular try/catch, never throws to cause black screen
+- markup.test.js: updated to assert 0 inline scripts, theme-loading not visibility:hidden, theme-init.js exists and CSP-safe
+
+### Security
+
+- No new permissions, still no remote fetches, no innerHTML
+
+
 ## [0.2.0] - 2026-09-23
 
 ### Added
