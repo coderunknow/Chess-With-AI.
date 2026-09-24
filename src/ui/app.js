@@ -208,56 +208,166 @@ export class App {
    * @returns {Promise<void>}
    */
   async start() {
-    // Load settings
-    this.#settings = mergeSettings(await readValue(SETTINGS_KEY, {}));
-    this.#engineLevel = Number(this.#settings.engineLevel) || 4;
-
-    // Apply theme immediately and cache to localStorage to prevent flash
-    this.#applyTheme();
-    this.#cacheTheme();
-
-    // Init i18n with resolved locale
-    const effectiveLocale = resolveLocale(this.#settings.locale);
-    this.#locale = effectiveLocale;
-    this.#t = createTranslator(effectiveLocale);
-    this.#applyI18n();
-
-    // Load library
+    // Black-screen safety: ensure visible immediately
     try {
-      this.#library = await readLibrary();
+      document.body?.classList.remove("theme-loading");
     } catch {
-      this.#library = { version: 2, games: [] };
+      void 0;
     }
-
-    // Restore game snapshot with migration
-    const snapshot = await readValue(GAME_KEY, null);
-    if (this.#settings.persistGame && snapshot) {
-      this.#session = GameSession.fromSnapshot(snapshot, { playerColor: this.#settings.playerColor });
-      log.info(`restored a game with ${this.#session.plyCount} plies (v${snapshot.version || 1}→v2)`);
-    } else {
-      this.#session = new GameSession({ playerColor: this.#settings.playerColor });
-    }
-
-    this.#applySettingsToDialog();
-    this.#render();
-    this.#renderLibrary();
-    await this.refreshConnection();
-
-    // Listen for system theme changes when theme=system
     try {
-      const media = window.matchMedia("(prefers-color-scheme: light)");
-      media.addEventListener?.("change", () => {
-        if (this.#settings.theme === "system") {
-          this.#applyTheme();
+      document.documentElement.style.background = "";
+    } catch {
+      void 0;
+    }
+
+    try {
+      // Load settings with fallback
+      let storedSettings = {};
+      try {
+        storedSettings = await readValue(SETTINGS_KEY, {});
+      } catch (e) {
+        log.warn("settings read failed", e);
+        storedSettings = {};
+      }
+      this.#settings = mergeSettings(storedSettings);
+      this.#engineLevel = Number(this.#settings.engineLevel) || 4;
+
+      // Apply theme immediately and cache to localStorage to prevent flash
+      try {
+        this.#applyTheme();
+      } catch (e) {
+        log.warn("applyTheme failed", e);
+      }
+      try {
+        this.#cacheTheme();
+      } catch {
+        void 0;
+      }
+
+      // Init i18n with resolved locale
+      try {
+        const effectiveLocale = resolveLocale(this.#settings.locale);
+        this.#locale = effectiveLocale;
+        this.#t = createTranslator(effectiveLocale);
+        this.#applyI18n();
+      } catch (e) {
+        log.warn("i18n init failed", e);
+        this.#t = createTranslator("en");
+        this.#locale = "en";
+      }
+
+      // Load library
+      try {
+        this.#library = await readLibrary();
+      } catch {
+        this.#library = { version: 2, games: [] };
+      }
+
+      // Restore game snapshot with migration — never throw
+      try {
+        const snapshot = await readValue(GAME_KEY, null);
+        if (this.#settings.persistGame && snapshot) {
+          this.#session = GameSession.fromSnapshot(snapshot, { playerColor: this.#settings.playerColor });
+          log.info(`restored a game with ${this.#session.plyCount} plies (v${snapshot.version || 1}→v2)`);
+        } else {
+          this.#session = new GameSession({ playerColor: this.#settings.playerColor });
         }
-      });
-    } catch {
-      // ignore
-    }
+      } catch (e) {
+        log.warn("snapshot restore failed, starting fresh", e);
+        try {
+          await removeValue(GAME_KEY);
+        } catch {
+          void 0;
+        }
+        this.#session = new GameSession({ playerColor: this.#settings.playerColor });
+      }
 
-    // Start clock tick if enabled
-    if (this.#settings.clockEnabled) {
-      this.#startClockTick();
+      try {
+        this.#applySettingsToDialog();
+      } catch (e) {
+        log.warn("applySettingsToDialog failed", e);
+      }
+
+      try {
+        this.#render();
+      } catch (e) {
+        log.warn("initial render failed", e);
+        // Try minimal render
+        try {
+          const statusNode = this.#refs.status;
+          if (statusNode) {
+            statusNode.textContent = "Board failed to render — try New Game or check console.";
+            statusNode.dataset.kind = "error";
+          }
+        } catch {
+          void 0;
+        }
+      }
+
+      try {
+        this.#renderLibrary();
+      } catch {
+        void 0;
+      }
+
+      try {
+        await this.refreshConnection();
+      } catch (e) {
+        log.debug("refreshConnection failed", e);
+      }
+
+      // Listen for system theme changes when theme=system
+      try {
+        const media = window.matchMedia("(prefers-color-scheme: light)");
+        media.addEventListener?.("change", () => {
+          if (this.#settings.theme === "system") {
+            this.#applyTheme();
+          }
+        });
+      } catch {
+        // ignore
+      }
+
+      // Start clock tick if enabled
+      if (this.#settings.clockEnabled) {
+        try {
+          this.#startClockTick();
+        } catch {
+          void 0;
+        }
+      }
+    } catch (error) {
+      log.error("start() fatal error", error);
+      this.#message = `Startup failed: ${error?.message || error}. Try New Game or reset settings.`;
+      this.#phase = Phase.ERROR;
+      try {
+        this.#render();
+      } catch {
+        void 0;
+      }
+    } finally {
+      try {
+        document.body.classList.remove("theme-loading");
+      } catch {
+        void 0;
+      }
+      try {
+        document.documentElement.style.background = "";
+      } catch {
+        void 0;
+      }
+      // Extra safety: force visible after short delay
+      try {
+        setTimeout(() => {
+          try {
+            document.body?.classList.remove("theme-loading");
+          } catch {
+            void 0;
+          }
+        }, 100);
+      } catch {
+        void 0;
+      }
     }
   }
 
@@ -277,10 +387,24 @@ export class App {
 
   #applyTheme() {
     const resolved = resolveTheme(this.#settings.theme);
-    document.body.dataset.theme = resolved;
-    document.body.dataset.boardTheme = this.#settings.boardTheme;
-    document.body.dataset.fontScale = this.#settings.fontScale;
-    document.body.dataset.density = this.#settings.density;
+    try {
+      document.body.dataset.theme = resolved;
+      document.body.dataset.boardTheme = this.#settings.boardTheme;
+      document.body.dataset.fontScale = this.#settings.fontScale;
+      document.body.dataset.density = this.#settings.density;
+    } catch {
+      void 0;
+    }
+    try {
+      document.body.classList.remove("theme-loading");
+    } catch {
+      void 0;
+    }
+    try {
+      document.documentElement.style.background = "";
+    } catch {
+      void 0;
+    }
   }
 
   #applyI18n() {

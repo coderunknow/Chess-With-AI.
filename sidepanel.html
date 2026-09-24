@@ -4,27 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI Chess Companion</title>
-    <script>
-      // Theme flash fix — apply stored theme before first paint using localStorage cache
-      (function () {
-        try {
-          var cached = localStorage.getItem("ai-chess-companion-theme-cache");
-          if (cached) {
-            var data = JSON.parse(cached);
-            if (data.theme) {
-              document.documentElement.setAttribute("data-theme-preload", data.theme);
-            }
-          }
-          // Also check system preference for initial flash reduction
-          var theme = cached ? JSON.parse(cached).theme : null;
-          var effective = theme;
-          if (!effective || effective === "system") {
-            effective = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-          }
-          document.documentElement.style.background = effective === "light" ? "#eef1f6" : "#0e1218";
-        } catch (e) {}
-      })();
-    </script>
+    <script src="src/ui/theme-init.js"></script>
     <link rel="stylesheet" href="src/ui/theme.css" />
   </head>
   <body
@@ -34,39 +14,6 @@
     data-density="comfortable"
     class="theme-loading"
   >
-    <script>
-      // Apply cached theme immediately to body to prevent flash
-      (function () {
-        try {
-          var cached = localStorage.getItem("ai-chess-companion-theme-cache");
-          var theme = "dark";
-          var boardTheme = "classic";
-          var fontScale = "medium";
-          var density = "comfortable";
-          if (cached) {
-            var data = JSON.parse(cached);
-            if (data.theme) theme = data.theme;
-            if (data.boardTheme) boardTheme = data.boardTheme;
-            if (data.fontScale) fontScale = data.fontScale;
-            if (data.density) density = data.density;
-          }
-          // Resolve system
-          var resolvedTheme = theme;
-          if (theme === "system") {
-            resolvedTheme = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-          }
-          document.body.setAttribute("data-theme", resolvedTheme);
-          document.body.setAttribute("data-board-theme", boardTheme);
-          document.body.setAttribute("data-font-scale", fontScale);
-          document.body.setAttribute("data-density", density);
-          document.body.classList.remove("theme-loading");
-          document.documentElement.style.background = "";
-        } catch (e) {
-          document.body.classList.remove("theme-loading");
-        }
-      })();
-    </script>
-
     <main class="panel">
       <header class="panel-header">
         <div class="panel-title">

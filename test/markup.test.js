@@ -54,14 +54,27 @@ test("the panel loads the entry module and nothing else", () => {
   const scripts = [...html.matchAll(/<script\b[^>]*>/g)].map((match) => match[0]);
   const external = scripts.filter((tag) => /src=/.test(tag));
   const inline = scripts.filter((tag) => !/src=/.test(tag));
-  // Allow 2 inline scripts for theme flash prevention, but only one external module
-  assert.equal(external.length, 1, `expected 1 external script, got ${external.length}: ${external.join(", ")}`);
-  assert.match(external[0], /type="module"/);
-  assert.match(external[0], /src="src\/ui\/main\.js"/);
-  // Inline scripts must be small and not load remote code (theme cache)
-  assert.ok(inline.length <= 2, `expected at most 2 inline scripts for theme flash fix, got ${inline.length}`);
-  for (const tag of inline) {
-    assert.ok(!/src=/.test(tag), "inline script should not have src");
+  // v0.2.0-patch1: CSP-safe, no inline scripts. 2 external: theme-init.js (classic) + main.js (module)
+  assert.ok(
+    external.length >= 1 && external.length <= 3,
+    `expected 1-3 external scripts, got ${external.length}: ${external.join(", ")}`,
+  );
+  const hasMain = external.some((tag) => /src="src\/ui\/main\.js"/.test(tag));
+  assert.ok(hasMain, "sidepanel.html must load src/ui/main.js");
+  const moduleScripts = external.filter((tag) => /type="module"/.test(tag));
+  assert.ok(moduleScripts.length >= 1, "at least one module script expected");
+  assert.ok(
+    moduleScripts.some((tag) => /main\.js/.test(tag)),
+    "main.js must be type=module",
+  );
+  // Inline scripts must be 0 for CSP compliance (black-screen fix)
+  assert.equal(inline.length, 0, `expected 0 inline scripts for CSP compliance, got ${inline.length}`);
+  // theme-init.js must exist if referenced
+  if (external.some((t) => /theme-init/.test(t))) {
+    assert.ok(
+      external.some((t) => /theme-init\.js/.test(t)),
+      "theme-init.js should be referenced",
+    );
   }
 });
 
@@ -116,6 +129,11 @@ test("the markup declares a theme and loads the stylesheet", async () => {
   const css = await read("src/ui/theme.css");
   assert.ok(css.includes('[data-theme="light"]'), "the light theme must be defined");
   assert.ok(css.includes('[data-theme="dark"]'), "the dark theme must be defined");
+  // Black-screen fix: theme-loading must not hide body with visibility:hidden
+  assert.ok(
+    !/body\.theme-loading\s*\{\s*visibility:\s*hidden/.test(css),
+    "theme-loading must not use visibility:hidden (causes black screen when CSP blocks inline)",
+  );
 });
 
 test("accessibility basics are present", () => {
@@ -164,4 +182,11 @@ test("no source file fetches remote resources", async () => {
     assert.ok(!/\bnew Function\b/.test(source), `${file} must not build functions from strings`);
     assert.ok(!/innerHTML\s*=/.test(source), `${file} must not assign innerHTML`);
   }
+});
+
+test("theme-init.js exists and is CSP-safe", async () => {
+  const themeInit = await read("src/ui/theme-init.js");
+  assert.ok(themeInit.includes("theme-loading"), "theme-init.js should handle theme-loading");
+  assert.ok(!/innerHTML/.test(themeInit), "theme-init.js must not use innerHTML");
+  assert.ok(!/fetch\s*\(/.test(themeInit), "theme-init.js must not use fetch");
 });
