@@ -1,0 +1,50 @@
+name: Upload patch asset
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to upload to (e.g. v0.2.0-patch1)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run package
+      - run: |
+          cp build/ai-chess-companion-0.2.1.zip build/ai-chess-companion-0.2.0-patch.zip
+          ls -lh build/
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          echo "Uploading to $TAG"
+          # retry logic
+          for asset in build/ai-chess-companion-0.2.0-patch.zip build/ai-chess-companion-0.2.1.zip; do
+            name=$(basename $asset)
+            echo "Handling $name"
+            gh release delete-asset "$TAG" "$name" --yes 2>/dev/null || true
+            for i in 1 2 3 4 5; do
+              echo "Attempt $i for $name"
+              if gh release upload "$TAG" "$asset" --clobber; then
+                echo "Uploaded $name"
+                break
+              fi
+              echo "Failed attempt $i"
+              sleep 3
+              gh release delete-asset "$TAG" "$name" --yes 2>/dev/null || true
+            done
+          done
+          gh release view "$TAG" --json assets --jq '.assets[].name'
