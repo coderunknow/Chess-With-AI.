@@ -1,7 +1,5 @@
 name: Upload patch asset
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
@@ -31,9 +29,8 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ inputs.tag || 'v0.2.0-patch1' }}"
+          TAG="${{ inputs.tag }}"
           echo "Uploading to $TAG"
-          # retry logic
           for asset in build/ai-chess-companion-0.2.0-patch.zip build/ai-chess-companion-0.2.1.zip; do
             name=$(basename $asset)
             echo "Handling $name"
