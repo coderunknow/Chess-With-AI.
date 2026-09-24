@@ -142,6 +142,7 @@ export class BoardView {
   #focusedSquare = -1;
   #hoverSquare = -1;
   #dragState = null;
+  #suppressClick = false;
   #lastMove = null;
   #animationEnabled = true;
   #ghost = null;
@@ -159,8 +160,14 @@ export class BoardView {
     this.#onDrop = onDrop || onSelect;
     this.#animationEnabled = animationEnabled;
 
-    // Click (existing)
+    // Click for activation without preceding pointer events (keyboard,
+    // assistive tech). Pointer taps/drags are handled in #onPointerUp, which
+    // claims the compatibility `click` that always follows them.
     this.#root.addEventListener("click", (event) => {
+      if (this.#suppressClick) {
+        this.#suppressClick = false;
+        return;
+      }
       if (this.isStatic()) {
         return;
       }
@@ -361,6 +368,9 @@ export class BoardView {
   }
 
   #onPointerDown(event) {
+    // A previous gesture whose `click` never arrived (e.g. released
+    // off-window) must not swallow the next genuine click.
+    this.#suppressClick = false;
     if (this.isStatic()) return;
     if (event.button !== 0) return; // only left click / primary touch
     const square = this.#squareFromEvent(event);
@@ -434,6 +444,10 @@ export class BoardView {
     this.#endDrag();
 
     if (to === null) return;
+    // Claim the compatibility `click` that follows every pointerup, so a tap
+    // selects exactly once (instead of select-then-deselect) and a drag
+    // doesn't reselect its origin square afterwards.
+    this.#suppressClick = true;
     if (!moved) {
       // Treat as click
       this.#onSelect(to);

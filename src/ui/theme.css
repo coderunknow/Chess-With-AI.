@@ -272,6 +272,10 @@ body.theme-loading .panel {
 .board {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
+  /* Pin the rows too: with implicit `auto` rows, ranks holding pieces grow
+     taller than empty ranks (piece glyphs vs. empty spans), so some squares
+     render unreasonably short/tall and the grid can overflow its aspect box. */
+  grid-template-rows: repeat(8, minmax(0, 1fr));
   aspect-ratio: 1;
   overflow: hidden;
   border-radius: var(--radius-small);
@@ -405,6 +409,13 @@ body.theme-loading .panel {
   filter: drop-shadow(0 2px 1px rgb(0 0 0 / 38%));
   transition: transform var(--board-transition);
   pointer-events: none;
+}
+
+/* Empty squares keep the same line box as occupied ones, so every square
+   paints identically regardless of whether it holds a glyph. */
+.piece:empty::before {
+  content: "\00a0";
+  visibility: hidden;
 }
 
 .piece-ghost {

@@ -136,6 +136,25 @@ test("the markup declares a theme and loads the stylesheet", async () => {
   );
 });
 
+test("the board grid pins all eight rows so squares stay uniform", async () => {
+  const css = await read("src/ui/theme.css");
+  const boardBlock = /\.board\s*\{[^}]*\}/.exec(css)?.[0] || "";
+  assert.match(
+    boardBlock,
+    /grid-template-rows:\s*repeat\(8,\s*minmax\(0,\s*1fr\)\)/,
+    ".board must pin 8 equal rows (implicit auto rows grow with piece glyphs)",
+  );
+  assert.ok(css.includes(".piece:empty::before"), "empty squares must reserve the same line box as occupied ones");
+});
+
+test("the move list never scrolls the page on re-render", async () => {
+  const history = await read("src/ui/history.js");
+  assert.ok(
+    !history.includes("scrollIntoView"),
+    "history.js must not call scrollIntoView — it scrolls the side-panel document",
+  );
+});
+
 test("accessibility basics are present", () => {
   assert.match(html, /<html lang="en">/);
   assert.match(html, /role="grid"/);
