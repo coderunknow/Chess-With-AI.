@@ -1,4 +1,4 @@
-# Chrome Web Store Listing — AI Chess Companion v0.5.0
+# Chrome Web Store Listing — AI Chess Companion v0.6.0
 
 ## Short name
 
@@ -56,4 +56,4 @@ Screenshots to prepare: (1) board and visibly pinned tab, (2) manual/Stop-wait s
 
 - [ ] Manual browser checklist on **all six** supported hosts (`docs/DEVELOPMENT.md`); automated DOM doubles do not certify live site layouts.
 - [ ] Create screenshots and host the privacy policy.
-- [ ] Run `npm run verify && npm run package`; upload `build/ai-chess-companion-0.5.0.zip` with its GPL-3 engine notice.
+- [ ] Run `npm run verify && npm run package`; upload `build/ai-chess-companion-0.6.0.zip` with its GPL-3 engine notice.

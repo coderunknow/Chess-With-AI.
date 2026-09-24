@@ -91,6 +91,7 @@ export class MoveWatcher {
   #known = new Set();
   #submitted = false;
   #manual = false;
+  #awaitEcho = false;
   #expectedPrompt = "";
   #rejectedMoves = new Set();
   #userBefore = new Set();
@@ -105,6 +106,8 @@ export class MoveWatcher {
    * @param {number} [options.maxWaitMs]
    * @param {DiagnosticsCollector} [options.diagnostics]
    * @param {string[]} [options.userSelectors]
+   * @param {() => void} [options.onEcho] fired once the matching NEW user-message echo appears
+   *   after {@link MoveWatcher#requireUserEcho}.
    */
   constructor({
     onMove,
@@ -114,8 +117,10 @@ export class MoveWatcher {
     maxWaitMs = MAX_WAIT_MS,
     diagnostics = null,
     userSelectors = [],
+    onEcho = () => {},
   }) {
     this.onMove = onMove;
+    this.onEcho = onEcho;
     this.getAssistantSelectors = assistantSelectors;
     this.getAssistantCandidates = assistantCandidates;
     this.settleMs = settleMs;
@@ -157,6 +162,7 @@ export class MoveWatcher {
     this.#submitted = false;
     this.#expectedPrompt = "";
     this.#manual = false;
+    this.#awaitEcho = false;
   }
 
   /**
@@ -173,9 +179,43 @@ export class MoveWatcher {
     this.#reported.clear();
     this.#lastScanHadNoMove = false;
     this.#manual = manual;
+    this.#awaitEcho = false;
     this.#userBefore = userMessageSnapshot(document, this.#userSelectors);
     this.#known = this.#existingAssistantContainers();
     this.start();
+  }
+
+  /**
+   * After ONE submit attempt whose delivery could not be confirmed, a reply
+   * may only be attributed to this request once the matching NEW user-message
+   * echo appears. Old transcript content or an unrelated chat message can
+   * therefore never arm the assistant side. If the echo already rendered, the
+   * gate opens immediately.
+   */
+  requireUserEcho() {
+    if (!this.#expectedPrompt || this.#manual) return;
+    if (this.#echoSeen()) {
+      this.#openEchoGate();
+      return;
+    }
+    this.#awaitEcho = true;
+  }
+
+  /** @returns {boolean} true when a NEW user message matches the expected prompt. */
+  #echoSeen() {
+    if (!this.#expectedPrompt || !this.#userSelectors.length) return false;
+    const messages = newUserMessages(document, this.#userSelectors, this.#userBefore, this.#expectedPrompt);
+    return messages.some((node) => isEchoOfPrompt(collapseWhitespace(textOf(node)), this.#expectedPrompt));
+  }
+
+  #openEchoGate() {
+    if (!this.#awaitEcho) return;
+    this.#awaitEcho = false;
+    try {
+      this.onEcho();
+    } catch (error) {
+      log.debug("onEcho handler failed", error);
+    }
   }
 
   /** Called immediately before Auto submit, or at the full Manual user echo. */
@@ -224,6 +264,11 @@ export class MoveWatcher {
    * @param {MutationRecord[]} records
    */
   #onMutations(records) {
+    // An unconfirmed submit opens only on the matching NEW user echo — checked
+    // for every batch so a late-rendered echo unblocks delivery immediately.
+    if (this.#awaitEcho && this.#submitted && this.#echoSeen()) {
+      this.#openEchoGate();
+    }
     if (this.#manual && !this.#submitted) {
       const messages = newUserMessages(document, this.#userSelectors, this.#userBefore, this.#expectedPrompt);
       const echo =

@@ -393,5 +393,695 @@
   },
   "illegal_repeated_move": {
     "message": "Nước này đã bị từ chối ở thế cờ hiện tại; hãy chọn nước hợp lệ khác."
+  },
+  "app_title": {
+    "message": "Trợ thủ Cờ vua AI"
+  },
+  "app_eyebrow": {
+    "message": "Chơi cờ với AI"
+  },
+  "app_loading": {
+    "message": "Đang khởi động…"
+  },
+  "board_label": {
+    "message": "Bàn cờ"
+  },
+  "board_check": {
+    "message": "{color} đang bị chiếu"
+  },
+  "board_checkmate": {
+    "message": "Chiếu hết"
+  },
+  "board_stalemate": {
+    "message": "Hòa cờ"
+  },
+  "board_empty": {
+    "message": "trống"
+  },
+  "board_selected": {
+    "message": "đã chọn"
+  },
+  "board_legalMove": {
+    "message": "nước đi hợp lệ"
+  },
+  "status_yourMove": {
+    "message": "Lượt của bạn. Bạn chơi {color}."
+  },
+  "status_yourMoveWhite": {
+    "message": "Lượt của bạn. Bạn chơi Trắng."
+  },
+  "status_yourMoveBlack": {
+    "message": "Lượt của bạn. Bạn chơi Đen."
+  },
+  "status_waitingAi": {
+    "message": "Đang chờ {platform} trả lời…"
+  },
+  "status_sending": {
+    "message": "Đang gửi nước đi tới {platform}…"
+  },
+  "status_noAi": {
+    "message": "Không phát hiện tab AI. Mở một tab AI được hỗ trợ để chơi."
+  },
+  "status_noAiAction": {
+    "message": "Mở tab AI"
+  },
+  "status_gameOver": {
+    "message": "Ván cờ kết thúc"
+  },
+  "status_newGame": {
+    "message": "Ván mới"
+  },
+  "status_check": {
+    "message": "Bạn đang bị chiếu — chỉ hiện nước đi hợp lệ để thoát."
+  },
+  "status_undo": {
+    "message": "Đã lùi {count} {count, plural, one {nước} other {nước}}."
+  },
+  "status_nothingToUndo": {
+    "message": "Chưa có gì để lùi."
+  },
+  "status_gameOverNew": {
+    "message": "Ván cờ đã kết thúc — bắt đầu ván mới để tiếp tục."
+  },
+  "status_aiTurn": {
+    "message": "Đến lượt AI."
+  },
+  "status_aiBelongs": {
+    "message": "Quân đó của AI."
+  },
+  "status_selectPiece": {
+    "message": "Hãy chọn một quân của bạn trước."
+  },
+  "status_noLegalMoves": {
+    "message": "Quân đó không có nước đi hợp lệ."
+  },
+  "status_promotionCancelled": {
+    "message": "Đã hủy phong cấp."
+  },
+  "status_fenCopied": {
+    "message": "Đã sao chép FEN."
+  },
+  "status_pgnCopied": {
+    "message": "Đã sao chép PGN vào clipboard."
+  },
+  "status_copyFailed": {
+    "message": "Sao chép thất bại — trình duyệt chặn truy cập clipboard."
+  },
+  "status_storageFull": {
+    "message": "Bộ nhớ đầy — xóa ván cũ để giải phóng."
+  },
+  "status_contentMissing": {
+    "message": "Không tìm thấy content script — tải lại tab AI để kết nối."
+  },
+  "status_reloadTab": {
+    "message": "Tải lại tab"
+  },
+  "status_copyPrompt": {
+    "message": "Sao chép prompt"
+  },
+  "status_promptCopied": {
+    "message": "Đã sao chép prompt — dán vào chat AI."
+  },
+  "status_askAi": {
+    "message": "Yêu cầu AI đi"
+  },
+  "status_askAgain": {
+    "message": "Hỏi lại"
+  },
+  "status_openAi": {
+    "message": "Mở tab AI"
+  },
+  "status_retrying": {
+    "message": "Đang hỏi lại AI (lần {attempt})…"
+  },
+  "status_illegalAi": {
+    "message": "AI trả lời [{move}] không hợp lệ. Hãy hỏi lại."
+  },
+  "status_couldNotReach": {
+    "message": "Không thể kết nối tới tab AI: {detail}"
+  },
+  "status_composerMissing": {
+    "message": "Không tìm thấy ô nhập chat trên trang này."
+  },
+  "status_typeFailed": {
+    "message": "Không thể gõ prompt cờ vua vào ô nhập."
+  },
+  "status_submitFailed": {
+    "message": "Không thể gửi prompt. Hãy gửi thủ công để tiếp tục."
+  },
+  "controls_undo": {
+    "message": "Lùi"
+  },
+  "controls_newGame": {
+    "message": "Ván mới"
+  },
+  "controls_flip": {
+    "message": "Lật bàn"
+  },
+  "controls_askAi": {
+    "message": "Yêu cầu AI đi"
+  },
+  "controls_copyPgn": {
+    "message": "Sao chép PGN"
+  },
+  "controls_openPgn": {
+    "message": "PGN…"
+  },
+  "controls_copyFen": {
+    "message": "Sao chép FEN"
+  },
+  "controls_settings": {
+    "message": "Cài đặt"
+  },
+  "moves_title": {
+    "message": "Nước đi"
+  },
+  "moves_empty": {
+    "message": "Chưa có nước đi. Chơi một quân trắng để bắt đầu."
+  },
+  "moves_white": {
+    "message": "nước trắng"
+  },
+  "moves_black": {
+    "message": "nước đen"
+  },
+  "moves_notPlayed": {
+    "message": "chưa chơi"
+  },
+  "position_title": {
+    "message": "Thế cờ"
+  },
+  "position_fen": {
+    "message": "FEN hiện tại"
+  },
+  "connections_title": {
+    "message": "Kết nối AI"
+  },
+  "connections_hint": {
+    "message": "Lời nhắc chỉ được gửi tới tab AI bạn ghim. Không có gì khác rời khỏi trình duyệt."
+  },
+  "connections_openTab": {
+    "message": "Mở tab"
+  },
+  "promotion_title": {
+    "message": "Phong cấp tốt"
+  },
+  "promotion_queen": {
+    "message": "Phong thành hậu"
+  },
+  "promotion_rook": {
+    "message": "Phong thành xe"
+  },
+  "promotion_bishop": {
+    "message": "Phong thành tượng"
+  },
+  "promotion_knight": {
+    "message": "Phong thành mã"
+  },
+  "promotion_cancel": {
+    "message": "Hủy"
+  },
+  "settings_title": {
+    "message": "Cài đặt"
+  },
+  "settings_playAs": {
+    "message": "Chơi bên"
+  },
+  "settings_playAsWhite": {
+    "message": "Trắng (đi trước)"
+  },
+  "settings_playAsBlack": {
+    "message": "Đen (AI mở)"
+  },
+  "settings_theme": {
+    "message": "Giao diện"
+  },
+  "settings_themeDark": {
+    "message": "Tối"
+  },
+  "settings_themeLight": {
+    "message": "Sáng"
+  },
+  "settings_themeSystem": {
+    "message": "Theo hệ thống"
+  },
+  "settings_locale": {
+    "message": "Ngôn ngữ"
+  },
+  "settings_localeEn": {
+    "message": "Tiếng Anh"
+  },
+  "settings_localeVi": {
+    "message": "Tiếng Việt"
+  },
+  "settings_localeSystem": {
+    "message": "Theo hệ thống"
+  },
+  "settings_boardTheme": {
+    "message": "Theme bàn cờ"
+  },
+  "settings_boardClassic": {
+    "message": "Cổ điển"
+  },
+  "settings_boardBlue": {
+    "message": "Xanh dương"
+  },
+  "settings_boardGreen": {
+    "message": "Xanh lá"
+  },
+  "settings_boardHighContrast": {
+    "message": "Tương phản cao"
+  },
+  "settings_fontScale": {
+    "message": "Cỡ chữ"
+  },
+  "settings_fontSmall": {
+    "message": "Nhỏ"
+  },
+  "settings_fontMedium": {
+    "message": "Vừa"
+  },
+  "settings_fontLarge": {
+    "message": "Lớn"
+  },
+  "settings_density": {
+    "message": "Mật độ"
+  },
+  "settings_densityComfortable": {
+    "message": "Thoải mái"
+  },
+  "settings_densityCompact": {
+    "message": "Gọn"
+  },
+  "settings_showCoordinates": {
+    "message": "Hiện tọa độ"
+  },
+  "settings_showLegalTargets": {
+    "message": "Làm nổi bật nước đi hợp lệ"
+  },
+  "settings_highlightLastMove": {
+    "message": "Làm nổi bật nước đi trước"
+  },
+  "settings_autoRetry": {
+    "message": "Hỏi lại khi AI trả lời nước không hợp lệ"
+  },
+  "settings_persistGame": {
+    "message": "Nhớ ván cờ giữa các phiên"
+  },
+  "settings_soundEnabled": {
+    "message": "Phát âm thanh (đi, ăn, chiếu)"
+  },
+  "settings_clockEnabled": {
+    "message": "Hiện đồng hồ"
+  },
+  "settings_animationsEnabled": {
+    "message": "Hoạt ảnh nước đi"
+  },
+  "settings_evalBarEnabled": {
+    "message": "Hiện thanh đánh giá"
+  },
+  "settings_hint": {
+    "message": "Cài đặt được lưu cục bộ. Không tải lên đâu cả."
+  },
+  "settings_done": {
+    "message": "Xong"
+  },
+  "settings_reset": {
+    "message": "Đặt lại mặc định"
+  },
+  "pgn_title": {
+    "message": "PGN ván cờ"
+  },
+  "pgn_copy": {
+    "message": "Sao chép"
+  },
+  "pgn_load": {
+    "message": "Nạp vào bàn"
+  },
+  "pgn_close": {
+    "message": "Đóng"
+  },
+  "pgn_placeholder": {
+    "message": "Dán PGN vào đây…"
+  },
+  "library_title": {
+    "message": "Thư viện ván cờ"
+  },
+  "library_empty": {
+    "message": "Chưa có ván nào được lưu."
+  },
+  "library_new": {
+    "message": "Ván mới"
+  },
+  "library_open": {
+    "message": "Mở"
+  },
+  "library_rename": {
+    "message": "Đổi tên"
+  },
+  "library_duplicate": {
+    "message": "Nhân bản"
+  },
+  "library_delete": {
+    "message": "Xóa"
+  },
+  "library_undoDelete": {
+    "message": "Đã xóa ván — Hoàn tác"
+  },
+  "library_undo": {
+    "message": "Hoàn tác"
+  },
+  "library_search": {
+    "message": "Tìm ván"
+  },
+  "library_import": {
+    "message": "Nhập PGN"
+  },
+  "library_export": {
+    "message": "Xuất"
+  },
+  "library_titleLabel": {
+    "message": "Tiêu đề"
+  },
+  "library_date": {
+    "message": "Ngày"
+  },
+  "library_result": {
+    "message": "Kết quả"
+  },
+  "library_moves": {
+    "message": "{count} nước"
+  },
+  "analysis_title": {
+    "message": "Phân tích"
+  },
+  "analysis_hint": {
+    "message": "Engine cục bộ — đánh giá heuristic, không hoàn hảo."
+  },
+  "analysis_bestMove": {
+    "message": "Nước tốt nhất"
+  },
+  "analysis_eval": {
+    "message": "Đánh giá"
+  },
+  "analysis_hintButton": {
+    "message": "Gợi ý"
+  },
+  "analysis_analyseGame": {
+    "message": "Phân tích ván"
+  },
+  "analysis_playVsEngine": {
+    "message": "Chơi với engine"
+  },
+  "analysis_strength": {
+    "message": "Độ mạnh"
+  },
+  "analysis_accuracy": {
+    "message": "Độ chính xác"
+  },
+  "analysis_blunder": {
+    "message": "Sai lầm nghiêm trọng"
+  },
+  "analysis_mistake": {
+    "message": "Sai lầm"
+  },
+  "analysis_inaccuracy": {
+    "message": "Thiếu chính xác"
+  },
+  "analysis_good": {
+    "message": "Tốt"
+  },
+  "analysis_brilliant": {
+    "message": "Xuất sắc"
+  },
+  "analysis_heuristicNote": {
+    "message": "Đánh giá này là heuristic, không phải tính toán hoàn hảo."
+  },
+  "analysis_evaluating": {
+    "message": "Đang đánh giá…"
+  },
+  "analysis_cancel": {
+    "message": "Hủy"
+  },
+  "diagnostics_title": {
+    "message": "Chẩn đoán"
+  },
+  "diagnostics_platform": {
+    "message": "Nền tảng phát hiện"
+  },
+  "diagnostics_composer": {
+    "message": "Ô nhập"
+  },
+  "diagnostics_sendButton": {
+    "message": "Nút gửi"
+  },
+  "diagnostics_assistant": {
+    "message": "Tin nhắn AI"
+  },
+  "diagnostics_timings": {
+    "message": "Thời gian"
+  },
+  "diagnostics_lastError": {
+    "message": "Lỗi cuối"
+  },
+  "diagnostics_copyReport": {
+    "message": "Sao chép báo cáo"
+  },
+  "diagnostics_reportCopied": {
+    "message": "Đã sao chép chẩn đoán."
+  },
+  "diagnostics_none": {
+    "message": "Không có"
+  },
+  "diagnostics_matched": {
+    "message": "Khớp: {selector}"
+  },
+  "diagnostics_notFound": {
+    "message": "Không tìm thấy — dùng clipboard fallback"
+  },
+  "shortcuts_title": {
+    "message": "Phím tắt"
+  },
+  "shortcuts_newGame": {
+    "message": "Ván mới: N"
+  },
+  "shortcuts_undo": {
+    "message": "Lùi: U"
+  },
+  "shortcuts_flip": {
+    "message": "Lật bàn: F"
+  },
+  "shortcuts_copyPgn": {
+    "message": "Sao chép PGN: C"
+  },
+  "shortcuts_focusBoard": {
+    "message": "Focus bàn: B"
+  },
+  "shortcuts_hint": {
+    "message": "Gợi ý: H"
+  },
+  "shortcuts_help": {
+    "message": "Trợ giúp: ?"
+  },
+  "shortcuts_close": {
+    "message": "Đóng: Escape"
+  },
+  "clock_white": {
+    "message": "Trắng"
+  },
+  "clock_black": {
+    "message": "Đen"
+  },
+  "status_submitUnconfirmed": {
+    "message": "Đã thử gửi một lần nhưng không xác nhận được. Hãy kiểm tra tab chat đã ghim trước khi sao chép hay gửi bất cứ thứ gì."
+  },
+  "status_checkChat": {
+    "message": "Kiểm tra tab chat"
+  },
+  "status_stillWaiting": {
+    "message": "Vẫn đang chờ {platform} trả lời. Lời nhắc đã gửi — không gửi lại."
+  },
+  "status_loadCancelled": {
+    "message": "Đã hủy nạp — ván hiện tại được giữ nguyên."
+  },
+  "delivery_title": {
+    "message": "Đã xảy ra gì?"
+  },
+  "delivery_neverAttempted": {
+    "message": "Lời nhắc chưa được gửi — chưa gõ hay bấm gì trong tab chat."
+  },
+  "delivery_attempted": {
+    "message": "Đã thử gửi một lần nhưng không xác nhận được. Hãy kiểm tra tab chat trước; chỉ sao chép hoặc gửi nếu tin nhắn chưa có ở đó."
+  },
+  "delivery_confirmed": {
+    "message": "Đã xác nhận lời nhắc được gửi. Đang chờ tab chat trả lời."
+  },
+  "delivery_answered": {
+    "message": "Tab chat đã trả lời và nước đi được áp lên bàn cờ."
+  },
+  "delivery_stale": {
+    "message": "Một cập nhật từ yêu cầu cũ đến trễ và đã bị bỏ qua."
+  },
+  "controls_confirmNewGame": {
+    "message": "Bắt đầu ván MỚI? Ván hiện tại sẽ kết thúc."
+  },
+  "controls_confirmReplaceGame": {
+    "message": "Thay ván hiện tại bằng ván này?"
+  },
+  "controls_more": {
+    "message": "Thêm"
+  },
+  "connections_change": {
+    "message": "Đổi"
+  },
+  "chip_pinned": {
+    "message": "{platform} — {title}"
+  },
+  "chip_none": {
+    "message": "Chưa ghim tab AI"
+  },
+  "play_youPlay": {
+    "message": "Bạn chơi {color}"
+  },
+  "firstRun_text": {
+    "message": "Hãy ghim một tab AI được hỗ trợ, chọn bên và đi một nước. Tiện ích gửi thế cờ tới tab đó và phát nước trả lời tại đây. Mọi thứ khác nằm trong Cài đặt."
+  },
+  "firstRun_dismiss": {
+    "message": "Đã hiểu"
+  },
+  "help_title": {
+    "message": "Cách chơi"
+  },
+  "help_pinnedChat": {
+    "message": "Tab AI đã ghim đóng vai đối thủ: mỗi nước hợp lệ được gửi tới đó một lần, và chỉ câu trả lời mới di chuyển quân."
+  },
+  "help_localTools": {
+    "message": "Gợi ý và Phân tích dùng engine cục bộ để đề xuất — chúng không bao giờ đi thay AI trong tab chat."
+  },
+  "help_rated": {
+    "message": "Ván xếp hạng tách riêng: Stockfish cục bộ (thang UCI_Elo, không phải FIDE) chơi một bên với AI tab chat, có lịch sử riêng."
+  },
+  "match_banner": {
+    "message": "XẾP HẠNG · AI tab chơi {chatColor} · Stockfish chơi {engineColor} (UCI_Elo {anchor})"
+  },
+  "match_ratedSection": {
+    "message": "Trận Stockfish xếp hạng"
+  },
+  "settings_groupInterface": {
+    "message": "Giao diện"
+  },
+  "settings_interfaceDetail": {
+    "message": "Chi tiết giao diện"
+  },
+  "settings_interfaceSimple": {
+    "message": "Đơn giản (khuyên dùng)"
+  },
+  "settings_interfaceAdvanced": {
+    "message": "Nâng cao (chi tiết kỹ thuật)"
+  },
+  "settings_boardOrientation": {
+    "message": "Hướng bàn cờ"
+  },
+  "settings_orientationFollow": {
+    "message": "Theo bên bạn chơi"
+  },
+  "settings_orientationWhite": {
+    "message": "Trắng ở dưới"
+  },
+  "settings_orientationBlack": {
+    "message": "Đen ở dưới"
+  },
+  "settings_moveListFormat": {
+    "message": "Định dạng danh sách nước"
+  },
+  "settings_moveListSan": {
+    "message": "SAN (e4, Nf3)"
+  },
+  "settings_moveListUci": {
+    "message": "UCI (e2e4, g1f3)"
+  },
+  "settings_moveInteraction": {
+    "message": "Cách đi nước"
+  },
+  "settings_interactionTapDrag": {
+    "message": "Chạm và kéo"
+  },
+  "settings_interactionTap": {
+    "message": "Chỉ chạm"
+  },
+  "settings_interactionDrag": {
+    "message": "Chỉ kéo"
+  },
+  "settings_confirmDestructive": {
+    "message": "Xác nhận trước khi thay ván hoặc đổi bên"
+  },
+  "settings_confirmDestructiveHint": {
+    "message": "Ván xếp hạng luôn hỏi xác nhận, kể cả khi tắt tùy chọn này."
+  },
+  "settings_waitingReminder": {
+    "message": "Nhắc “vẫn đang chờ”"
+  },
+  "settings_reminderOff": {
+    "message": "Tắt"
+  },
+  "settings_reminderShort": {
+    "message": "Sau 30 giây"
+  },
+  "settings_reminderMedium": {
+    "message": "Sau 1 phút"
+  },
+  "settings_reminderLong": {
+    "message": "Sau 2 phút"
+  },
+  "settings_reminderHint": {
+    "message": "Hiện nhắc nhẹ khi đang chờ phản hồi. Không bao giờ gửi lại lời nhắc hay đổi kết quả."
+  },
+  "more_title": {
+    "message": "Thêm"
+  },
+  "generic_ok": {
+    "message": "OK"
+  },
+  "generic_cancel": {
+    "message": "Hủy"
+  },
+  "generic_close": {
+    "message": "Đóng"
+  },
+  "generic_save": {
+    "message": "Lưu"
+  },
+  "generic_delete": {
+    "message": "Xóa"
+  },
+  "generic_edit": {
+    "message": "Sửa"
+  },
+  "generic_copy": {
+    "message": "Sao chép"
+  },
+  "generic_loading": {
+    "message": "Đang tải…"
+  },
+  "generic_error": {
+    "message": "Lỗi"
+  },
+  "generic_success": {
+    "message": "Thành công"
+  },
+  "settings_waitingReminderOff": {
+    "message": "Tắt"
+  },
+  "settings_waitingReminder30s": {
+    "message": "Sau 30 giây"
+  },
+  "settings_waitingReminder60s": {
+    "message": "Sau 1 phút"
+  },
+  "settings_waitingReminder2m": {
+    "message": "Sau 2 phút"
+  },
+  "tools_title": {
+    "message": "Công cụ"
   }
 }

@@ -38,6 +38,21 @@ export const PROMPT_STYLES = Object.freeze({
   CONCISE: "concise",
 });
 
+/** Interface detail levels: visibility of technical explanations only. */
+export const INTERFACE_DETAILS = Object.freeze(["simple", "advanced"]);
+
+/** Board orientation choices. */
+export const BOARD_ORIENTATIONS = Object.freeze(["follow-side", "white", "black"]);
+
+/** On-screen move-list formats (PGN always stays SAN). */
+export const MOVE_LIST_FORMATS = Object.freeze(["san", "uci"]);
+
+/** Pointer move-interaction modes; keyboard operation is unaffected. */
+export const MOVE_INTERACTIONS = Object.freeze(["tap-drag", "tap", "drag"]);
+
+/** Bounded "still waiting" reminder delays; 0 disables the reminder. */
+export const WAITING_REMINDER_CHOICES = Object.freeze([0, 30000, 60000, 120000]);
+
 /**
  * @typedef {object} Settings
  * @property {'w'|'b'} playerColor side the human plays in a new game.
@@ -64,6 +79,12 @@ export const PROMPT_STYLES = Object.freeze({
  * @property {boolean} paused soft pause, persisted across service-worker restarts.
  * @property {number} matchAnchorElo requested Stockfish UCI_Elo; clamped again to the binary range.
  * @property {number} matchMoveTimeMs Stockfish go movetime, 100–5000ms.
+ * @property {'simple'|'advanced'} interfaceDetail visibility of technical details (never of recovery actions).
+ * @property {'follow-side'|'white'|'black'} boardOrientation which side sits at the bottom.
+ * @property {'san'|'uci'} moveListFormat on-screen history format; PGN remains SAN.
+ * @property {'tap-drag'|'tap'|'drag'} moveInteraction pointer gesture style; keyboard always works.
+ * @property {boolean} confirmDestructive ask before replacing an ongoing game or switching sides.
+ * @property {0|30000|60000|120000} waitingReminderMs quiet "still waiting" notice; never resends.
  */
 
 /** @type {Readonly<Settings>} */
@@ -92,6 +113,12 @@ export const DEFAULT_SETTINGS = Object.freeze({
   paused: false,
   matchAnchorElo: 1500,
   matchMoveTimeMs: 500,
+  interfaceDetail: "simple",
+  boardOrientation: "follow-side",
+  moveListFormat: "san",
+  moveInteraction: "tap-drag",
+  confirmDestructive: true,
+  waitingReminderMs: 0,
 });
 
 /** Bounds for {@link Settings.maxRetries}. */
@@ -165,6 +192,14 @@ export function normaliseSettings(input) {
     paused: asBoolean(source.paused, DEFAULT_SETTINGS.paused),
     matchAnchorElo: boundedNumber(source.matchAnchorElo, DEFAULT_SETTINGS.matchAnchorElo, 0, 5000),
     matchMoveTimeMs: boundedNumber(source.matchMoveTimeMs, DEFAULT_SETTINGS.matchMoveTimeMs, 100, 5000),
+    interfaceDetail: asEnum(source.interfaceDetail, INTERFACE_DETAILS, DEFAULT_SETTINGS.interfaceDetail),
+    boardOrientation: asEnum(source.boardOrientation, BOARD_ORIENTATIONS, DEFAULT_SETTINGS.boardOrientation),
+    moveListFormat: asEnum(source.moveListFormat, MOVE_LIST_FORMATS, DEFAULT_SETTINGS.moveListFormat),
+    moveInteraction: asEnum(source.moveInteraction, MOVE_INTERACTIONS, DEFAULT_SETTINGS.moveInteraction),
+    confirmDestructive: asBoolean(source.confirmDestructive, DEFAULT_SETTINGS.confirmDestructive),
+    waitingReminderMs: WAITING_REMINDER_CHOICES.includes(Number(source.waitingReminderMs))
+      ? Number(source.waitingReminderMs)
+      : DEFAULT_SETTINGS.waitingReminderMs,
   };
 }
 

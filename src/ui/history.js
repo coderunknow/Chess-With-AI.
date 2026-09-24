@@ -118,6 +118,7 @@ export class HistoryView {
    */
   render(history, options) {
     const rows = describeHistory(history, options);
+    const format = options?.format === "uci" ? "uci" : "san";
     this.#emptyState.hidden = rows.length > 0;
 
     if (rows.length === 0) {
@@ -135,8 +136,8 @@ export class HistoryView {
       number.textContent = `${row.number}.`;
       item.append(number);
 
-      item.append(createMoveCell(row.white, "white move", row.whitePly, options.currentPly));
-      item.append(createMoveCell(row.black, "black move", row.blackPly, options.currentPly));
+      item.append(createMoveCell(row.white, "white move", row.whitePly, options.currentPly, format));
+      item.append(createMoveCell(row.black, "black move", row.blackPly, options.currentPly, format));
       fragment.append(item);
     }
 
@@ -197,9 +198,10 @@ export class HistoryView {
  * @param {string} description
  * @param {number} ply ply index
  * @param {number} currentPly
+ * @param {'san'|'uci'} [format] on-screen format; titles and labels keep both.
  * @returns {HTMLSpanElement} a move cell.
  */
-function createMoveCell(entry, description, ply, currentPly) {
+function createMoveCell(entry, description, ply, currentPly, format = "san") {
   const cell = document.createElement("span");
   cell.className = "history-move";
   if (!entry) {
@@ -217,8 +219,9 @@ function createMoveCell(entry, description, ply, currentPly) {
     cell.classList.add("is-active-ply");
   }
 
-  cell.textContent = entry.san;
+  cell.textContent = format === "uci" ? entry.uci : entry.san;
   cell.dataset.ply = String(ply + 1);
+  cell.dataset.uci = entry.uci;
   cell.title = `${entry.uci}${entry.mate ? " (checkmate)" : entry.check ? " (check)" : ""}${entry.comment ? ` — ${entry.comment}` : ""}${entry.classification ? ` [${entry.classification}]` : ""}`;
   cell.setAttribute(
     "aria-label",

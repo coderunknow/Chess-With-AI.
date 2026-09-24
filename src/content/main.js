@@ -31,8 +31,10 @@ const log = createLogger("content");
 const STATUS = Object.freeze({
   READY: "ready",
   PROMPT_SENT: "prompt-sent",
+  PROMPT_ECHOED: "prompt-echoed",
   GENERATION_WAIT: "generation-wait",
   MANUAL: "manual",
+  SUBMIT_UNCONFIRMED: "submit-unconfirmed",
   ERROR: "error",
   NO_MOVE: "no-move",
 });
@@ -56,6 +58,10 @@ export function start() {
   let currentRequestId = null;
   let deliveryReady = false;
   let queuedReply = null;
+  // True after ONE submit attempt whose confirmation is still pending: replies
+  // stay queued until the matching user-message echo attributes them to this
+  // request (never to old transcript content or an unrelated chat message).
+  let awaitingEchoGate = false;
 
   const deliver = (event) => {
     watcher.stop();
@@ -82,6 +88,19 @@ export function start() {
       if (deliveryReady) deliver(event);
       else queuedReply = event; // a fast reply during submit verification
     },
+    onEcho: () => {
+      // The ambiguous send is now attributable: the full prompt echoed as a
+      // NEW user message. Flip to a confirmed wait WITHOUT another submit.
+      if (paused || !awaitingEchoGate) return;
+      awaitingEchoGate = false;
+      deliveryReady = true;
+      notifyPanel({ state: STATUS.PROMPT_ECHOED, requestId: currentRequestId, platform: platform?.id || "" });
+      if (queuedReply) {
+        const reply = queuedReply;
+        queuedReply = null;
+        deliver(reply);
+      }
+    },
   });
 
   const setPaused = (next) => {
@@ -91,6 +110,7 @@ export function start() {
       bridge.cancel();
       queuedReply = null;
       deliveryReady = false;
+      awaitingEchoGate = false;
     }
   };
 
@@ -132,6 +152,7 @@ export function start() {
       bridge.cancel(); // also abort a Stop/generation wait before it can submit
       queuedReply = null;
       deliveryReady = false;
+      awaitingEchoGate = false;
       sendResponse({ ok: true });
       return false;
     }
@@ -165,6 +186,7 @@ export function start() {
       currentRequestId = message.requestId ?? null;
       queuedReply = null;
       deliveryReady = false;
+      awaitingEchoGate = false;
       watcher.expectReply(prompt, { rejectedMoves: message.rejectedMoves || [], manual });
       if (manual) {
         let copied = false;
@@ -193,7 +215,52 @@ export function start() {
           }
         },
       });
-      if (!result.ok || paused) {
+      if (paused) {
+        watcher.stop();
+        queuedReply = null;
+        awaitingEchoGate = false;
+        notifyPanel({
+          state: STATUS.ERROR,
+          requestId: currentRequestId,
+          error: "The companion is paused.",
+          platform: platform?.id || "",
+          diagnostics: result.diagnostics,
+        });
+        sendResponse({
+          ok: false,
+          paused: true,
+          error: "The companion is paused.",
+          result: result.result,
+          diagnostics: result.diagnostics,
+        });
+        return;
+      }
+      if (!result.ok && result.result === "submit-unconfirmed") {
+        // ONE submit event fired; the host just did not confirm it in time.
+        // Never claim "nothing was sent". Keep the watcher armed and gate any
+        // reply on the matching NEW user-message echo — if the message really
+        // went through, the echo (or the reply after it) attributes safely and
+        // NO second submit is issued.
+        awaitingEchoGate = true;
+        deliveryReady = false;
+        notifyPanel({
+          state: STATUS.SUBMIT_UNCONFIRMED,
+          requestId: currentRequestId,
+          error: result.error,
+          platform: platform?.id || "",
+          diagnostics: result.diagnostics,
+        });
+        sendResponse({
+          ok: false,
+          unconfirmed: true,
+          result: result.result,
+          error: result.error,
+          diagnostics: result.diagnostics,
+        });
+        watcher.requireUserEcho(); // may resolve immediately when the echo already rendered
+        return;
+      }
+      if (!result.ok) {
         watcher.stop();
         queuedReply = null;
         let copied = false;
@@ -206,17 +273,16 @@ export function start() {
           }
         }
         notifyPanel({
-          state: paused ? STATUS.ERROR : result.result,
+          state: STATUS.ERROR,
           requestId: currentRequestId,
-          error: paused ? "The companion is paused." : result.error,
+          error: result.error,
           platform: platform?.id || "",
           diagnostics: result.diagnostics,
         });
         sendResponse({
           ok: false,
-          paused,
           copied,
-          error: paused ? "The companion is paused." : result.error,
+          error: result.error,
           result: result.result,
           diagnostics: result.diagnostics,
         });

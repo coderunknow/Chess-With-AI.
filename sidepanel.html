@@ -12,6 +12,7 @@
     data-board-theme="classic"
     data-font-scale="medium"
     data-density="comfortable"
+    data-interface="simple"
     class="theme-loading"
   >
     <main class="panel">
@@ -20,8 +21,33 @@
           <p class="eyebrow" id="app-eyebrow">Chess against your AI</p>
           <h1 id="app-title">AI Chess Companion</h1>
         </div>
-        <span class="panel-mark" aria-hidden="true">&#9822;</span>
+        <div class="header-actions">
+          <span class="panel-mark" aria-hidden="true">&#9822;</span>
+          <div class="more-wrap">
+            <button
+              id="more-button"
+              type="button"
+              class="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="more-menu"
+            >
+              More
+            </button>
+            <div id="more-menu" class="more-menu" role="menu" hidden>
+              <button id="more-settings" type="button" role="menuitem" class="button">Settings</button>
+              <button id="more-help" type="button" role="menuitem" class="button">Help</button>
+            </div>
+          </div>
+        </div>
       </header>
+
+      <aside id="first-run" class="first-run" hidden>
+        <p id="first-run-text" class="hint">
+          Pin the tab with your AI chat, make a move, then use the one action shown below to ask for the AI's reply.
+        </p>
+        <button id="first-run-dismiss" type="button" class="button">Got it</button>
+      </aside>
 
       <section class="board-area" aria-label="Chess board">
         <div id="board" class="board" role="grid" aria-label="Chess board"></div>
@@ -50,6 +76,16 @@
         <button id="reload-tab" type="button" class="button" hidden>Reload tab</button>
       </div>
 
+      <details id="what-happened" class="panel-section what-happened" hidden>
+        <summary id="delivery-title">What happened?</summary>
+        <p id="what-happened-detail" class="hint"></p>
+      </details>
+
+      <p id="pin-chip" class="pin-chip is-empty">
+        <span id="pin-chip-text">No AI chat pinned</span>
+        <button id="pin-change" type="button" class="button">Change</button>
+      </p>
+
       <dl class="meta">
         <div class="meta-row">
           <dt id="turn-label">Turn</dt>
@@ -61,20 +97,33 @@
         </div>
       </dl>
 
-      <div class="controls">
-        <button id="undo" type="button" class="button">Undo</button>
+      <p id="rated-banner" class="rated-banner" hidden></p>
+
+      <div class="controls play-line">
+        <span id="side-line" class="side-line"></span>
         <button id="new-game" type="button" class="button">New game</button>
-        <button id="flip" type="button" class="button" title="Flip the board">Flip</button>
-        <button id="switch-side" type="button" class="button" title="Start a new game as the other side">
-          Play Black
-        </button>
-        <button id="pause" type="button" class="button" aria-pressed="false">Pause</button>
-        <button id="ask-ai" type="button" class="button button-primary" hidden>Ask the AI to move</button>
-        <button id="hint" type="button" class="button">Hint</button>
-        <button id="analyse-game" type="button" class="button">Analyse</button>
       </div>
 
-      <details id="connections" class="panel-section" open>
+      <p id="moves-preview" class="moves-preview is-empty">No moves yet.</p>
+
+      <details id="tools-section" class="panel-section">
+        <summary id="tools-title">Tools</summary>
+        <div class="section-body">
+          <div class="controls">
+            <button id="pause" type="button" class="button" aria-pressed="false">Pause</button>
+            <button id="ask-ai" type="button" class="button button-primary" hidden>Ask the AI to move</button>
+            <button id="undo" type="button" class="button">Undo</button>
+            <button id="flip" type="button" class="button" title="Flip the board">Flip</button>
+            <button id="switch-side" type="button" class="button" title="Start a new game as the other side">
+              Play Black
+            </button>
+            <button id="hint" type="button" class="button">Hint</button>
+            <button id="analyse-game" type="button" class="button">Analyse</button>
+          </div>
+        </div>
+      </details>
+
+      <details id="connections" class="panel-section">
         <summary id="connections-title">AI chat connections</summary>
         <div class="section-body">
           <p class="hint" id="connections-hint">
@@ -94,7 +143,7 @@
         </div>
       </details>
 
-      <details id="history-section" class="panel-section" open>
+      <details id="history-section" class="panel-section">
         <summary id="moves-title">Moves</summary>
         <div class="section-body">
           <p id="moves-empty" class="hint">No moves yet. Play a white piece to start.</p>
@@ -153,13 +202,16 @@
           </p>
           <div class="match-summary" aria-live="polite">
             <h3 id="match-title">Stockfish Elo match</h3>
+            <p id="rated-title" class="hint">
+              Rated Stockfish match — separate history and result from your chat game.
+            </p>
             <p id="match-estimate">No rated games yet.</p>
             <p class="hint" id="match-scale">Stockfish UCI_Elo scale, not FIDE.</p>
           </div>
         </div>
       </details>
 
-      <details class="panel-section" id="position-section">
+      <details class="panel-section advanced-only" id="position-section">
         <summary id="position-title">Position</summary>
         <div class="section-body">
           <code id="fen" class="fen" aria-label="Current FEN"></code>
@@ -173,7 +225,7 @@
         </div>
       </details>
 
-      <details id="diagnostics-section" class="panel-section">
+      <details id="diagnostics-section" class="panel-section advanced-only">
         <summary id="diagnostics-title">Diagnostics</summary>
         <div class="section-body">
           <dl class="meta">
@@ -293,6 +345,59 @@
             >Remember the game between sessions</span
           ></label
         >
+      </fieldset>
+      <fieldset class="settings-group" id="settings-group-interface">
+        <legend id="settings-interface-group">Interface</legend>
+        <label class="field" for="settings-interface-detail"
+          ><span id="settings-interface-detail-label">Interface detail</span>
+          <select id="settings-interface-detail" class="select">
+            <option value="simple" data-i18n="settings.interfaceSimple">Simple (recommended)</option>
+            <option value="advanced" data-i18n="settings.interfaceAdvanced">Advanced (technical details)</option>
+          </select>
+        </label>
+        <label class="field" for="settings-board-orientation"
+          ><span id="settings-orientation-label">Board orientation</span>
+          <select id="settings-board-orientation" class="select">
+            <option value="follow-side" data-i18n="settings.orientationFollow">Follow the side you play</option>
+            <option value="white" data-i18n="settings.orientationWhite">White at the bottom</option>
+            <option value="black" data-i18n="settings.orientationBlack">Black at the bottom</option>
+          </select>
+        </label>
+        <label class="field" for="settings-move-list-format"
+          ><span id="settings-move-format-label">Move list format</span>
+          <select id="settings-move-list-format" class="select">
+            <option value="san" data-i18n="settings.moveListSan">SAN (e4, Nf3)</option>
+            <option value="uci" data-i18n="settings.moveListUci">UCI (e2e4, g1f3)</option>
+          </select>
+        </label>
+        <label class="field" for="settings-move-interaction"
+          ><span id="settings-move-interaction-label">Move interaction</span>
+          <select id="settings-move-interaction" class="select">
+            <option value="tap-drag" data-i18n="settings.interactionTapDrag">Tap and drag</option>
+            <option value="tap" data-i18n="settings.interactionTap">Tap only</option>
+            <option value="drag" data-i18n="settings.interactionDrag">Drag only</option>
+          </select>
+        </label>
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="confirmDestructive" /><span data-i18n="settings.confirmDestructive"
+            >Confirm before replacing a game or switching sides</span
+          ></label
+        >
+        <p id="settings-confirm-destructive-hint" class="hint">
+          Rated matches always ask for confirmation, even when this is off.
+        </p>
+        <label class="field" for="settings-waiting-reminder"
+          ><span id="settings-waiting-reminder-label">“Still waiting” reminder</span>
+          <select id="settings-waiting-reminder" class="select">
+            <option value="0" data-i18n="settings.reminderOff">Off</option>
+            <option value="30000" data-i18n="settings.reminderShort">After 30 seconds</option>
+            <option value="60000" data-i18n="settings.reminderMedium">After 1 minute</option>
+            <option value="120000" data-i18n="settings.reminderLong">After 2 minutes</option>
+          </select>
+        </label>
+        <p id="settings-reminder-hint" class="hint">
+          Shows a gentle notice while waiting for a reply. It never resends the prompt or changes the result.
+        </p>
       </fieldset>
       <fieldset class="settings-group" id="settings-group-sound">
         <legend id="settings-sound-group">Sound</legend>
@@ -435,6 +540,18 @@
 
     <dialog id="shortcuts-dialog" class="dialog" aria-labelledby="shortcuts-title">
       <h2 id="shortcuts-title" class="dialog-title">Keyboard shortcuts</h2>
+      <section id="help-section" class="help-section">
+        <h3 id="help-title">How playing works</h3>
+        <p id="help-pinned-chat" class="hint">
+          The companion types into the AI chat tab you pin — one message per move, never a second send.
+        </p>
+        <p id="help-local-tools" class="hint">
+          Hint and Analyse use the local engine on this device; they never post anything to the chat.
+        </p>
+        <p id="help-rated" class="hint">
+          A rated match is separate: local Stockfish plays one side against the chat AI, with its own history.
+        </p>
+      </section>
       <dl class="meta">
         <div class="meta-row">
           <dt>New game</dt>

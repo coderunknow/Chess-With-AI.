@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-24
+
+### Fixed
+
+- **No more false "Could not submit the prompt" at checkmate.** The five-layer P0 fix separates _never attempted_ from _attempted but unconfirmed_: the bridge records every send attempt (`SUBMIT_UNCONFIRMED`), the content script keeps the watcher alive and waits for the user-echo gate instead of discarding a fast reply, and the panel guards late failures/ack/timeouts against terminal positions (`expectedReplyId` + `isGameOver` + reply-epoch). Status descriptions now prefer the board outcome over stale delivery errors, so a finished game stays finished; `status.submitFailed` appears only when nothing was ever dispatched (or a **different** new user message proves the prompt never reached the transcript). An ambiguous send instructs **Check the pinned chat** — never an automatic resend — and a confirmed-sent prompt shows "Waiting for … to answer". Copy/Ask recovery is hidden the moment a result is accepted.
+- Late `CONTENT_STATUS`/`SEND_CHESS_PROMPT` failures, stale asks, and delayed diagnostics can no longer overwrite a checkmate/stalemate/draw result or re-prompt after a human checkmate. Pause, unpin, new game, undo, side switch and Stop all invalidate outstanding callbacks (reply-epoch bump).
+
+### Added
+
+- **Compact Play-first view** with progressive disclosure: header + one **More** menu (Settings, Help), board, context-driven status card with a single primary action, pinned-chat chip with **Change**, side line + New game, compact move preview with the full history collapsed, and Tools/Library/Analysis/Position/Diagnostics behind expandables. Dismissible first-run note; "What happened?" delivery disclosure (never-attempted / unconfirmed / confirmed-awaiting / stale) with technical detail kept privacy-safe.
+- **Help section** (More → Help) that distinguishes the pinned chat, local Hint/Analyse tools, and rated matches.
+- **Rated banner** showing which side the chat AI and Stockfish play (UCI_Elo anchor) while a rated match is active.
+- **Six new local settings** (validated in `src/shared/settings.js`, defaults preserve old storage): interface detail Simple/Advanced (default Simple — only technical sections hide), board orientation follow-side/white/black (default follow-side), move-list display SAN/UCI (default SAN; PGN stays SAN), move interaction tap-drag/tap-only/drag-only (default tap-drag; keyboard unchanged), destructive-action confirmation (default on; rated starts always confirm), and a bounded "still waiting" reminder Off/30s/60s/2m (default Off — it never resends, never changes the result).
+- Regression tests A–F for the delivery/checkmate race (`test/status.test.js`), bridge contradiction fail-closed behavior, and settings defaults/corrupt/persistence/reset/locale coverage (`test/settings.test.js`); updated markup tests for the compact view.
+
 ## [0.5.0] - 2026-09-24
 
 ### Fixed

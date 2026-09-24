@@ -4,7 +4,7 @@
 
 **Extension Name:** AI Chess Companion (Chess With AI)
 
-**Version:** 0.5.0
+**Version:** 0.6.0
 
 ## Summary
 
