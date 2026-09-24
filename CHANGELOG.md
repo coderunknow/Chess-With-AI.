@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-24
+
+### Fixed
+
+- One move now sends **at most one** chat message across all six supported platforms. The bridge waits for Stop/streaming to end, verifies the full prompt, and never clicks Stop or follows a successful button click with Enter/`requestSubmit`. Ambiguous sends and timeouts offer a copy instead of an automatic keystroke retry.
+- Illegal AI moves now explain the rule (pins, castling, en passant, promotions, etc.); bounded retry prompts include the legal set in safe `e2-e4` notation and the previously rejected moves. Echoed requests and historical assistant containers cannot become moves. Maximum retries end in error with **Ask again**, without a local engine substituting an AI move.
+- Out-of-turn source-piece moves are rejected by `Position.legalMovesFrom`; perft and existing chess rules remain exact. Move sounds now classify captures by SAN/flags instead of looking for `x` in UCI.
+
+### Added
+
+- One explicitly **pinned AI tab** (session storage; local fallback) with a supported-tab picker showing content-script titles and hosts. Focus cannot retarget prompts; tab closure or off-host navigation clears the pin with a visible explanation. White/Black toolbar switch starts a new game, with confirmation if moves exist.
+- Persisted soft Pause/Resume disconnects the transcript observer and stops workers, leaving the content script injected but idle, with `OFF` badge. Manual send mode copies instead of typing/clicking; generation wait is configurable (default 120 seconds).
+- Settings grouped as Board, Sound, Clock, AI and Engine. Adjustable clock duration, off-by-default synthesized wood knocks with volume, and 180ms piece/capture/castle/promotion animations respecting reduced motion.
+- A **real rated match** versus the packaged, single-threaded Stockfish.js **17.1 Lite NNUE WASM** worker. The worker uses its own reported UCI_Elo min/max, `UCI_LimitStrength` and `go movetime`; it never plays the chat AI's turn. Only finished chess results/parsed resignations count. Per-anchor local records/export, AI-colour alternation, n/W–D–L, bounded MLE and 95% profile-likelihood interval (provisional when small/wide). Label: **Stockfish UCI_Elo scale, not FIDE**. Heuristic levels 1–8 remain unrated.
+- Tests for full-string readback, six-host Stop protection, one-submit behavior, retry echoes/reasons, pinned tab and pause, real-game match plumbing, draw-aware estimator and UCI range clamp. No runtime npm dependency, remote engine download, new permission or second rules engine.
+
+### Licensing
+
+- Extension UCI controller/UI remains MIT. The **vendored Stockfish.js component is GPL-3**; unchanged copyright/author notices, GPL text and exact upstream source are in `engine/stockfish/`. The exact corresponding Lite source is **bundled** as `engine/stockfish/stockfish.js-v17.1.0-lite-single-source.tar.gz` from commit `f9512ef9aff391026813a56855dd086cb72a2d58`; published archive: **https://registry.npmjs.org/stockfish/-/stockfish-17.1.0.tgz**. See `engine/stockfish/SOURCE.md` for hashes and UCI verification.
+
 ## [0.2.2] - 2026-09-24
 
 ### Fixed

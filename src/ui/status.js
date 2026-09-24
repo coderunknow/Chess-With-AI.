@@ -95,6 +95,7 @@ export function describeStatus({
   }
 
   if (busy || phase === "sending") {
+    if (message) return make(message, StatusKind.WAITING);
     const platform = connection.label || "the AI";
     const text = tr ? tr("status.sending", { platform }) : `Sending your move to ${platform}…`;
     return make(text, StatusKind.WAITING);
@@ -107,21 +108,15 @@ export function describeStatus({
   if (!connection.supported) {
     if (phase === "awaiting" || session.isWaitingForAi) {
       const opponent = sideLabel(session.aiColor, connection, tr);
-      const text = message
-        ? message
-        : tr
-          ? tr("status.waitingAi", { platform: opponent }) + " No AI chat open."
-          : `It is ${opponent}'s turn, but no AI chat is open. Open a supported AI to keep playing.`;
+      const text =
+        message ||
+        (t
+          ? tr("status.awaitingUnpinned", { color: opponent })
+          : `It is ${opponent}'s turn, but no AI chat is pinned. Pin a supported AI tab to continue.`);
       return make(text, StatusKind.WAITING, StatusAction.OPEN_AI);
     }
-    const text = message
-      ? message
-      : tr
-        ? tr("status.noAi")
-        : "No AI chat detected. Open one of the supported AI chats to play.";
-    const lower = text.toLowerCase();
-    const action = lower.includes("no ai") ? StatusAction.OPEN_AI : StatusAction.NONE;
-    return make(text, StatusKind.INFO, action);
+    const text = message || (t ? tr("status.noAi") : "No AI chat detected. Open a supported AI chat to play.");
+    return make(text, StatusKind.INFO, StatusAction.OPEN_AI);
   }
 
   if (message) {
@@ -140,8 +135,12 @@ export function describeStatus({
     return make(text, StatusKind.ERROR);
   }
 
-  const colorName = session.playerColor === Color.WHITE ? "White" : "Black";
-  const text = tr ? tr("status.yourMove", { color: colorName }) : `Your move. Playing as ${colorName}.`;
+  const colorName = t
+    ? tr(session.playerColor === Color.WHITE ? "clock.white" : "clock.black")
+    : session.playerColor === Color.WHITE
+      ? "White"
+      : "Black";
+  const text = t ? tr("status.yourMove", { color: colorName }) : `Your move. Playing as ${colorName}.`;
   return make(text, StatusKind.SUCCESS);
 }
 
@@ -152,27 +151,26 @@ export function describeStatus({
  */
 export function describeOutcome(session, t = null) {
   const outcome = session.outcome;
-  const mover = session.playerColor === Color.WHITE ? "White" : "Black";
+  const mover = t
+    ? t(session.playerColor === Color.WHITE ? "clock.white" : "clock.black")
+    : session.playerColor === Color.WHITE
+      ? "White"
+      : "Black";
 
   if (t) {
-    switch (outcome.reason) {
-      case "checkmate":
-        return outcome.winner === session.playerColor
-          ? `Checkmate — you win as ${mover}! ${outcome.result}`
-          : `Checkmate — the AI wins. ${outcome.result}`;
-      case "stalemate":
-        return `Draw by stalemate. ${outcome.result}`;
-      case "fifty-move":
-        return `Draw by the fifty-move rule. ${outcome.result}`;
-      case "insufficient-material":
-        return `Draw — not enough material to mate. ${outcome.result}`;
-      case "threefold-repetition":
-        return `Draw by threefold repetition. ${outcome.result}`;
-      default:
-        return "The game is over.";
-    }
+    const key =
+      outcome.reason === "checkmate"
+        ? outcome.winner === session.playerColor
+          ? "outcome.checkmateWin"
+          : "outcome.checkmateLose"
+        : {
+            stalemate: "outcome.stalemate",
+            "fifty-move": "outcome.fiftyMove",
+            "insufficient-material": "outcome.insufficientMaterial",
+            "threefold-repetition": "outcome.threefold",
+          }[outcome.reason] || "status.gameOver";
+    return t(key, { color: mover, result: outcome.result });
   }
-
   switch (outcome.reason) {
     case "checkmate":
       return outcome.winner === session.playerColor
@@ -236,9 +234,6 @@ function status(text, kind, action = StatusAction.NONE) {
  * @returns {string} a readable name for the side that should move.
  */
 function sideLabel(color, connection, t = null) {
-  const name = color === Color.WHITE ? "White" : "Black";
-  if (t && connection.label) {
-    return `${connection.label} (${name})`;
-  }
+  const name = t ? t(color === Color.WHITE ? "clock.white" : "clock.black") : color === Color.WHITE ? "White" : "Black";
   return connection.label ? `${connection.label} (${name})` : name;
 }

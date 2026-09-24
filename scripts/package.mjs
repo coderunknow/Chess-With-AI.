@@ -20,7 +20,16 @@ import { ROOT, readManifest, readMetaVersion } from "./manifest-utils.mjs";
 
 const execFileAsync = promisify(execFile);
 
-const INCLUDED = ["manifest.json", "sidepanel.html", "src", "icons", "LICENSE", "README.md", "CHANGELOG.md"];
+const INCLUDED = [
+  "manifest.json",
+  "sidepanel.html",
+  "src",
+  "engine/stockfish",
+  "icons",
+  "LICENSE",
+  "README.md",
+  "CHANGELOG.md",
+];
 
 const manifest = await readManifest();
 const version = await readMetaVersion();

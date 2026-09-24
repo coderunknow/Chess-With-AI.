@@ -1,153 +1,45 @@
-# Architecture
+# Architecture — v0.5.0
 
-AI Chess Companion is a zero-build Manifest V3 extension. The repository _is_ the extension: no bundler, no
-transpiler, no runtime dependencies. Node is used only for tests and tooling.
+The checked-out repository **is** a zero-build Manifest V3 extension. Runtime npm dependencies: **zero**. `src/core` and `src/shared` are pure of DOM/`chrome.*`; the separately licensed Stockfish worker lives under `engine/stockfish`, not in the chess rules engine. There is no backend or telemetry.
 
-## Layers
-
-```
-src/core        pure chess rules — no DOM, no chrome.*, runs in Node and in the browser
-src/shared      platform registry, message contract, prompts, settings, storage, logging
-src/background  service worker: side-panel behaviour, toolbar badge, active-tab tracking
-src/content     AI page integration: bootstrap -> bridge (composer) + observer (transcript)
-src/ui          side panel: session model -> render models -> DOM views
+```text
+Panel (src/ui/main.js → App)     ── SEND_CHESS_PROMPT(requestId) ──▶ pinned tab's content script
+  GameSession + board/history       ┌───────────┐                       bridge → chat composer
+  local rules (src/core)             │ background│ PIN_TAB/GET_CONNECTIONS  observer ← assistant DOM
+  heuristic search worker            │ pin/badge │                       AI_MOVE(requestId, sender.tab.id)
+  rated Stockfish WASM worker         └───────────┘                       only after prompt baseline
 ```
 
-Dependency direction is strictly one way: `ui`/`content`/`background` → `shared` → `core`.
-ESLint enforces the boundary with `no-restricted-globals` on `core`/`shared` (no `document`, no `window`, no `chrome`).
+## Layers and ownership
 
-### Why a classic bootstrap for the content script?
+- `src/core`: FEN, position, legal moves, outcome and SAN/PGN. Perft counts are unchanged. `illegal-move.js` **explains** a rejected UCI using the position's legal set; it is not another rules engine. The opponent-piece check in `legalMovesFrom` also forbids out-of-turn `moveFromUci` resolution.
+- `src/shared`: platforms/host allowlist, protocol, settings validation, English/Vietnamese strings, local match records and pure Elo estimation. `MAX_PROMPT_LENGTH` remains 4000. Unknown stored settings and corrupt match records are discarded without affecting the game snapshot/library.
+- `src/background`: side-panel setup, one `pinnedAiTab` storage record (`chrome.storage.session`, local fallback), supported-tab picker, pin lifecycle and badge. Host permissions allow querying supported tabs; `PING` to each content script supplies `document.title` (no `tabs` permission). A closed tab or navigation off a supported host clears the pin and reports it. Focus events cannot reassign a pin. Pause overrides all badge states with `OFF` and is read from persisted settings on worker startup.
+- `src/content`: classic `index.js` bootstrap dynamically imports ESM `main.js`; `bridge.js` handles **one send**, and `observer.js` only tracks assistant containers appearing after that prompt's baseline. It ignores composer/user messages, request echoes, retry echoes, legal-list markers and already-rejected UCIs. On Manual mode it waits for the user's **full** new prompt message before accepting an assistant container. No observer starts merely because the script was injected or because Pause was resumed. `MoveWatcher.stop()` disconnects on Pause, cancel or accepted reply.
+- `src/ui`: unchanged `GameSession` turn ownership, phase enum, snapshot migration and undo. `App` orchestrates the current board, the connection, guarded sends/retries, soft pause and a rated-match state. `BoardView` keeps the 64 buttons stable, with an overlay transform for movement/capture fades; reduced-motion or disabled animation updates instantly. The heuristic search is for Hint/Analyse and an explicit **local** Play vs engine game, never a substitute for the chat AI's move.
 
-Manifest V3 content scripts cannot be ES modules (`"type": "module"` is only valid for the service worker). The
-standard workaround is used here:
+## Send and reply contract
 
-```js
-// src/content/index.js — the only classic script in the extension
-const entry = chrome.runtime.getURL("src/content/main.js");
-import(entry).then((module) => module.start());
-```
+1. The background validates the live pin just before each send; a request is addressed to that tab ID only. App records a `requestId` and ignores runtime replies unless both the originating `sender.tab.id` and request ID match. Unknown or lost pins never fall back to the focused tab.
+2. The content script reads persisted Pause and send mode. When paused it returns `{ok:false,paused:true}`. When Auto, the bridge's in-flight guard starts **before** waiting for Stop/streaming controls to disappear. The AI setting bounds that wait (5–180s, default 120s). Stop is identified by accessible names/title/test IDs and site streaming markers across all six hosts; it is never clicked and Enter is never pressed while it is visible.
+3. The bridge types the complete prompt and requires **full-string equality with collapsed whitespace** on read-back. It uses a named Send/Submit button if present, otherwise one Enter sequence. A button click can **never** fall through to Enter/`requestSubmit`. It waits for an empty composer or a new full user-message confirmation, and treats two new user messages or an unresolved composer as ambiguous failure. Diagnostics record the generation wait, Stop sighting, chosen method, suppressed second event and equality check. Failed/timeout prompts are offered (and, on timeout, attempted) as clipboard copies; no automatic resubmission occurs.
+4. The watcher baselines assistant containers immediately before the submit action. It accepts only new assistant containers (not old history, echoed prompts or user messages), prioritises the **first bracketed** UCI, and uses bare UCI only when no prompt/legal-list marker is present. Manual mode waits for the new user echo first. On a legal parsed move `GameSession.playFirstAvailable()` validates and applies it. An illegal result produces one-sentence rule explanation, safe hyphenated legal list, rejected set, FEN and history. Retries stop at `maxRetries` in the existing `error` phase; Ask again is one correction. Neither engine plays an AI-owned turn.
+5. Soft Pause disconnects the observer, terminates both workers, prevents sends and persists `paused`. Resume starts no observer until a new request; closing the panel is not Pause. No content-script unregistration, `chrome.management`, polling interval or extra permission is used.
 
-Consequences that are easy to get wrong, and how they are handled:
+## Stockfish match (distinct from the heuristic engine)
 
-| Consequence                                                                        | Mitigation                                                                          |
-| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Every module reachable from `main.js` must be listed in `web_accessible_resources` | `npm run check:manifest` walks the module graph and fails when a pattern is missing |
-| A missing pattern fails silently at runtime (the extension loads, nothing happens) | The bootstrap logs a loud error, and CI blocks the manifest drift                   |
-| A double injection would register listeners twice                                  | Both `index.js` (sync flag) and `main.js` (module flag) guard against it            |
-| Import failures are asynchronous                                                   | `main.js` reports its state through `CONTENT_STATUS`, which the panel surfaces      |
+`engine/stockfish/stockfish-17.1-lite-single-03e3232.js/.wasm` is the **unchanged upstream single-threaded Stockfish.js 17.1 Lite NNUE pair**, with GPL-3 license and copyright headers intact. [SOURCE.md](../engine/stockfish/SOURCE.md) pins the exact upstream source/tag/sha and observed handshake. A classic worker, separate from the scanned ESM graph, loads only its **packaged** `.wasm` from a `chrome.runtime.getURL` URL. The extension page CSP has only `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'`; no remote script source. `src/ui/stockfish.js` speaks UCI and is MIT extension code.
 
-## Chess core (`src/core`)
+At boot the UCI controller **requires** the binary's `UCI_LimitStrength`, `UCI_Elo min/max` and a single-threaded handshake. A boot failure disables match controls and hides any estimate until an engine is ready again. Anchors are 10-point controls clamped to the reported range (observed 1320–3190); default 1500 only if inside it. Commands are `UCI_LimitStrength true`, `UCI_Elo <anchor>`, `ucinewgame`, `position fen ...`, `go movetime <100–5000ms>` — **no** Skill Level, random noise, MultiPV or depth-to-rating mapping.
 
-Squares are indices `0..63` (`a1 = 0`), pieces are FEN characters (`P`, `n`, ...). That keeps FEN, SAN and UCI
-handling conversion-free.
+A rated game replaces the current game after confirmation. Chat AI is White in the first **rated** game and Black in the next; only completed rated games advance alternation. The other colour is the Stockfish slot in `GameSession` (via `playHumanMove` with a legality check); chat replies enter **only** via the pinned content observer (via `playFirstAvailable`). Invalid Stockfish output is re-searched once, then the game aborts unrated. Protocol failure/timeout, Stop, pause, or pin loss ends a game **unfinished / unrated**. Only terminal `outcome()` reasons (checkmate, stalemate, fifty-move, threefold, insufficient material) or an explicit assistant resignation after both sides have played are scored. Each saved record has the actual match PGN, anchor, AI colour, outcome, platform ID and move counts, under `ratedMatches` (schema v1, quota-aware, **separate** from board/library). Export produces plain PGN.
 
-| Module        | Responsibility                                                    |
-| ------------- | ----------------------------------------------------------------- |
-| `pieces.js`   | Colour/type helpers, Unicode glyphs, promotion choices            |
-| `squares.js`  | Index ↔ algebraic conversion, light/dark squares                  |
-| `attacks.js`  | Precomputed knight/king tables, ray tables, `isSquareAttacked`    |
-| `move.js`     | Move record, flags, UCI codec                                     |
-| `fen.js`      | FEN parse/format with strict validation (`FenError`)              |
-| `position.js` | Move generation, legality, make/unmake, repetition keys, outcomes |
-| `pgn.js`      | SAN rendering and PGN import/export                               |
-| `index.js`    | The public surface of the core                                    |
+For a selected anchor, completed AI scores (W=1, D=0.5, L=0) maximise the bounded fractional-Bernoulli logistic log likelihood with expected score `1/(1+10^((anchor-rating)/400))`. A **95% profile-likelihood interval** uses `2*(max logL - logL(r)) ≤ 3.8414588` (chi-squared, one degree of freedom). All-win/all-loss samples have **one-sided boundary MLEs**, not invented ratings. Games at different anchors are not pooled. `provisional` means fewer than 8 rated games or interval width >200 points. Every estimate shows n, W–D–L, estimate, interval and **Stockfish UCI_Elo scale, not FIDE**. Heuristic levels 1–8 have no Elo.
 
-**Move generation.** Candidate moves are generated from the board, then filtered by making the move and asking
-"is my king attacked?". `makeMove`/`unmakeMove` are the same primitives the tests use for perft, so the fast path
-(no cloning, no allocation per legality check) is also the tested path.
+## Security and verification
 
-**Position keys.** Repetition uses `board | turn | castling | en-passant`, where the en-passant field is only
-included when a capture is actually available — which is what FIDE requires for a repetition claim.
+- No untrusted text is rendered as HTML: AI text, tab titles, clipboard and PGN use `textContent`/DOM APIs. No inline scripts, `eval` or `new Function`. Module-graph tests ban remote `fetch`, `XMLHttpRequest` and `WebSocket` from panel/content/background graphs. The upstream classic engine worker is outside that graph; its WASM URL is an extension-packaged URL only.
+- Host permissions cover exactly the six AI services (eight declared hostnames), with only `sidePanel`, `scripting` and `storage` permissions. No CDN download, remote executable code, rating server or telemetry.
+- `npm run check:manifest` checks host patterns, versions and the entire dynamically imported content graph. `npm run verify` additionally lints, checks formatting, and runs perft, UI/bridge/match tests. `npm run package` includes `engine/stockfish`, **its GPL text and the exact corresponding Lite source bundle** in the zip.
 
-**Outcomes.** `outcome()` reports checkmate, stalemate, fifty-move, insufficient material and threefold repetition
-with a PGN result token (`1-0`, `0-1`, `1/2-1/2`, `*`).
-
-## Platform registry (`src/shared/platforms.js`)
-
-The registry is the single source of truth for:
-
-- the hostnames the extension may touch (`host_permissions`, `content_scripts.matches`, `web_accessible_resources.matches`),
-- the composer/send-button/reply selectors per site,
-- the display name used in the UI.
-
-`manifest.json` is checked in (so the folder stays loadable) but its host lists are generated:
-
-```bash
-npm run sync:manifest    # rewrite the generated fields
-npm run check:manifest   # CI: fail when the manifest and the registry disagree
-```
-
-## Content scripts (`src/content`)
-
-**`bridge.js` — writing to the composer.** Finds the input by trying platform-specific selectors first and generic
-ones afterwards, preferring the bottom-most editable element. Typing uses the React-proof native value setter for
-`<textarea>`/`<input>` and `execCommand("insertText")` for contenteditable editors, followed by an `input` event.
-Submitting prefers a send button and falls back to a full Enter key sequence. After submitting it waits for the
-composer to clear, which is how every supported site acknowledges a sent message.
-
-**`observer.js` — reading the reply.** A single `MutationObserver` on `document.body` nominates candidate message
-containers. Because streaming answers mutate continuously, a scan is scheduled after 600 ms of quiet with a 2.5 s
-upper bound. The newest container with a bracketed move wins. Guards:
-
-- echoes of our own prompt are filtered (`isEchoOfPrompt`),
-- nodes inside the composer or a user-message container are ignored,
-- the same move is not reported twice inside 15 s,
-- replies longer than 20 000 characters are not scanned.
-
-## Side panel (`src/ui`)
-
-```
-GameSession (model)          BoardView / HistoryView / status line (views)
-  position + history            describeBoard()      -> pure description of 64 cells
-  turn ownership                describeHistory()    -> numbered rows
-  undo / retry / snapshot       describeStatus()     -> text + tone + action
-```
-
-`app.js` owns the phase machine and is the only module that touches the DOM and `chrome.*` at once:
-
-```
-idle ──human move──▶ sending ──accepted──▶ awaiting ──AI reply──▶ idle
-                       │                     │
-                       └──error──▶ error     └──illegal reply──▶ retry (bounded)
-```
-
-Everything the views need is derived from the session, so a render is always a pure function of the state:
-board, move list, status line, buttons and the FEN field are recomputed together.
-
-**Persistence.** `chrome.storage.local` holds `settings` (validated on read) and `game` (a versioned snapshot:
-starting FEN, player colour, UCI move list). A snapshot that cannot be replayed is discarded and a fresh game
-starts, so a corrupt value can never wedge the panel.
-
-## Service worker (`src/background`)
-
-Deliberately small: panel behaviour (`openPanelOnActionClick`), a debounced tab tracker that updates the toolbar
-badge and tells the panel which tab to use, and the `GET_ACTIVE_TAB` responder. Listeners are registered
-synchronously so no event is missed when the worker is restarted.
-
-The side panel is enabled everywhere (the board is useful without a chat), while the content script only ever runs
-on the supported AI hosts.
-
-## Data flow
-
-1. Player clicks a piece → `GameSession.legalTargets()` → `describeBoard()` marks destinations.
-2. Player clicks a destination → `playHumanMove()` → prompt built by `buildMovePrompt()`.
-3. `SEND_CHESS_PROMPT` → content bridge types and submits it in the active tab.
-4. `MutationObserver` → `extractMoveCandidates()` → `AI_MOVE` message to the panel.
-5. `GameSession.playFirstAvailable()` validates and applies the move; an illegal reply triggers `buildRetryPrompt()`.
-
-## Security
-
-- No `eval`, no `new Function`, no `innerHTML`, no `fetch` — asserted by `test/markup.test.js`.
-- UCI is validated before use; all AI text is treated as untrusted input.
-- Minimal permissions: `sidePanel`, `scripting`, `storage`; host permissions limited to the AI platforms.
-- The packaged archive contains only `manifest.json`, `sidepanel.html`, `src/`, `icons/` and licence files.
-
-## Extending
-
-| Change          | Where                                                                                              |
-| --------------- | -------------------------------------------------------------------------------------------------- |
-| New AI platform | `src/shared/platforms.js`, then `npm run sync:manifest`                                            |
-| New board theme | `src/ui/theme.css` (`[data-theme="..."]`) plus the option in `sidepanel.html`                      |
-| New setting     | `src/shared/settings.js`, the dialog in `sidepanel.html`, and `#applySettingsToDialog` in `app.js` |
-| New UI element  | `sidepanel.html` + the `byId` map in `src/ui/main.js` (a test fails if the id is missing)          |
-| Engine feature  | `src/core/position.js` with a perft or unit test next to it                                        |
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the browser checklist and release process.

@@ -24,5 +24,374 @@
   "noAi": {
     "message": "No AI chat detected",
     "description": "No AI tab"
+  },
+  "connections_pinned": {
+    "message": "Pinned: {platform} — {title}"
+  },
+  "connections_choosePin": {
+    "message": "Choose and pin one supported AI tab before sending a prompt."
+  },
+  "connections_noTabs": {
+    "message": "No supported AI tabs open. Open one below, then refresh."
+  },
+  "connections_pinMarker": {
+    "message": "PINNED"
+  },
+  "connections_pinLost": {
+    "message": "The pinned AI tab closed or left a supported host. Choose another tab; no prompt was sent."
+  },
+  "connections_pinFailed": {
+    "message": "That tab could not be pinned. Open a supported AI chat and try again."
+  },
+  "connections_unpinned": {
+    "message": "AI tab unpinned. Choose a tab before the next prompt."
+  },
+  "connections_refresh": {
+    "message": "Refresh tabs"
+  },
+  "connections_unpin": {
+    "message": "Unpin"
+  },
+  "connections_tabList": {
+    "message": "Open AI chat tabs"
+  },
+  "controls_playWhite": {
+    "message": "Play White"
+  },
+  "controls_playBlack": {
+    "message": "Play Black"
+  },
+  "controls_pause": {
+    "message": "Pause"
+  },
+  "controls_resume": {
+    "message": "Resume"
+  },
+  "controls_confirmSide": {
+    "message": "Start a NEW game as the other side? The current game will end."
+  },
+  "controls_switchSideTitle": {
+    "message": "Start a new game as the other side"
+  },
+  "status_sideNewGame": {
+    "message": "You now play {color}. A new game has started."
+  },
+  "status_paused": {
+    "message": "Companion paused. No prompts or observers are active."
+  },
+  "status_resumed": {
+    "message": "Companion resumed. Ask the AI again when a reply is expected."
+  },
+  "status_waitGeneration": {
+    "message": "Waiting for {platform} to finish generating… Do not press Enter."
+  },
+  "status_manualSend": {
+    "message": "Copy the prompt, paste and send it yourself in the pinned AI tab. The reply will be watched."
+  },
+  "status_manualCopied": {
+    "message": "Prompt copied. Paste and send it yourself in the pinned AI tab; waiting for your message."
+  },
+  "status_generationTimeout": {
+    "message": "The model is still generating. No prompt was sent; copy it to send later."
+  },
+  "status_verifyFailed": {
+    "message": "The full prompt was not in the composer. Nothing was sent. Copy it instead."
+  },
+  "status_retryReason": {
+    "message": "Asking again (attempt {attempt}) — {reason}"
+  },
+  "status_illegalReason": {
+    "message": "The AI answered [{move}]: {reason} Ask again to correct it."
+  },
+  "status_outOfTurn": {
+    "message": "Ignored [{move}]: it is your turn."
+  },
+  "status_noMove": {
+    "message": "no move"
+  },
+  "status_repeatedMove": {
+    "message": "repeated move"
+  },
+  "status_aiResigned": {
+    "message": "The AI resigned. Start a new game to play again."
+  },
+  "status_sendFailure": {
+    "message": "Could not send the prompt: {detail} Copy it instead."
+  },
+  "settings_groupBoard": {
+    "message": "Board"
+  },
+  "settings_groupSound": {
+    "message": "Sound"
+  },
+  "settings_groupClock": {
+    "message": "Clock"
+  },
+  "settings_groupAi": {
+    "message": "AI"
+  },
+  "settings_groupEngine": {
+    "message": "Engine"
+  },
+  "settings_maxRetries": {
+    "message": "Maximum retries"
+  },
+  "settings_sendMode": {
+    "message": "Send mode"
+  },
+  "settings_sendAuto": {
+    "message": "Auto — send one message"
+  },
+  "settings_sendManual": {
+    "message": "Manual — copy and paste"
+  },
+  "settings_generationWait": {
+    "message": "Wait for generation (seconds)"
+  },
+  "settings_soundVolume": {
+    "message": "Volume"
+  },
+  "settings_clockDuration": {
+    "message": "Minutes per side"
+  },
+  "settings_localLevel": {
+    "message": "Local strength (1–8, no Elo)"
+  },
+  "match_title": {
+    "message": "Stockfish Elo match"
+  },
+  "match_scale": {
+    "message": "Stockfish UCI_Elo scale, not FIDE"
+  },
+  "match_stockfishNotice": {
+    "message": "Strength-limited Stockfish is GPL-3, runs locally, no network. Stockfish UCI_Elo scale, not FIDE."
+  },
+  "match_loading": {
+    "message": "Loading Stockfish…"
+  },
+  "match_engineReady": {
+    "message": "Stockfish ready. UCI_Elo range: {min}–{max}."
+  },
+  "match_engineError": {
+    "message": "Stockfish unavailable: {detail} Matches are disabled."
+  },
+  "match_paused": {
+    "message": "Stockfish stopped while paused. Resume to reload it."
+  },
+  "match_unavailable": {
+    "message": "WASM has not started"
+  },
+  "match_noGames": {
+    "message": "No rated games yet. Complete a real game against the pinned chat AI."
+  },
+  "match_estimate": {
+    "message": "{n} games · W–D–L {wins}–{draws}–{losses} · {rating} {boundary} · 95% interval [{low}, {high}] {provisional}"
+  },
+  "match_provisional": {
+    "message": "provisional"
+  },
+  "match_boundary": {
+    "message": "(bounded MLE)"
+  },
+  "match_anchor": {
+    "message": "Stockfish anchor UCI_Elo"
+  },
+  "match_moveTime": {
+    "message": "Move time (ms)"
+  },
+  "match_start": {
+    "message": "Start rated game"
+  },
+  "match_stop": {
+    "message": "Stop match"
+  },
+  "match_export": {
+    "message": "Export match PGNs"
+  },
+  "match_exported": {
+    "message": "Match PGNs copied and exported."
+  },
+  "match_requiresAuto": {
+    "message": "Rated matches require Auto send mode. Change it in AI settings."
+  },
+  "match_requiresPin": {
+    "message": "Rated matches require one live pinned AI chat tab."
+  },
+  "match_confirmReplace": {
+    "message": "Start a rated Stockfish match? This starts a NEW game and replaces the current board."
+  },
+  "match_started": {
+    "message": "Rated game started. Chat AI plays {color}; Stockfish anchor {anchor}."
+  },
+  "match_engineThinking": {
+    "message": "Stockfish is choosing a move at UCI_Elo {anchor}…"
+  },
+  "match_unratedProtocol": {
+    "message": "Protocol failed: game unfinished / unrated. No engine move replaced the AI."
+  },
+  "match_unratedStopped": {
+    "message": "Match stopped: game unfinished / unrated."
+  },
+  "match_pinLost": {
+    "message": "Pinned tab lost: match unfinished / unrated. Pin another chat to play."
+  },
+  "match_storageError": {
+    "message": "Could not store the rated game. No estimate was updated."
+  },
+  "match_finished": {
+    "message": "Rated game finished: {result}. See the estimate in Analysis."
+  },
+  "match_running": {
+    "message": "Stop the rated match before loading a different game."
+  },
+  "analysis_confirmEngine": {
+    "message": "Start a NEW local game against the heuristic engine? This replaces the current board."
+  },
+  "analysis_engineMode": {
+    "message": "Local engine game started (strength 1–8, no Elo)."
+  },
+  "analysis_engineFailed": {
+    "message": "The local engine could not make a move."
+  },
+  "illegal_malformed": {
+    "message": "The coordinate move is malformed."
+  },
+  "illegal_empty_square": {
+    "message": "The origin {from} is empty."
+  },
+  "illegal_opponent_piece": {
+    "message": "The piece on {from} belongs to the other side."
+  },
+  "illegal_does_not_move_that_way": {
+    "message": "That piece cannot move from {from} to {to}."
+  },
+  "illegal_blocked": {
+    "message": "The path is blocked at {blocker}."
+  },
+  "illegal_leaves_king_in_check": {
+    "message": "That move would leave the king in check."
+  },
+  "illegal_castle_rights": {
+    "message": "Castling rights or the required rook are missing."
+  },
+  "illegal_castle_blocked": {
+    "message": "Castling is blocked at {blocker}."
+  },
+  "illegal_castle_through_check": {
+    "message": "The king cannot castle out of, through, or into check."
+  },
+  "illegal_en_passant_illegal": {
+    "message": "There is no legal en passant capture on that square."
+  },
+  "illegal_promotion_required": {
+    "message": "A pawn reaching the last rank needs a promotion suffix (q, r, b or n)."
+  },
+  "illegal_promotion_illegal": {
+    "message": "Promotion is only allowed on a pawn move to the last rank."
+  },
+  "illegal_not_in_legal_set": {
+    "message": "That move is not in the legal set for this position."
+  },
+  "badge_paused": {
+    "message": "AI Chess Companion — paused"
+  },
+  "badge_pin": {
+    "message": "AI Chess Companion — pin an AI chat tab to play"
+  },
+  "badge_pinned": {
+    "message": "AI Chess Companion — pinned to {platform}"
+  },
+  "badge_check": {
+    "message": "AI Chess Companion — {color} is in check"
+  },
+  "badge_white": {
+    "message": "AI Chess Companion — White to move"
+  },
+  "badge_black": {
+    "message": "AI Chess Companion — Black to move"
+  },
+  "status_timeoutCopied": {
+    "message": "The AI is still generating. The prompt was copied; nothing was sent."
+  },
+  "meta_turn": {
+    "message": "Turn"
+  },
+  "meta_opponent": {
+    "message": "Opponent"
+  },
+  "status_turn": {
+    "message": "{color} to move"
+  },
+  "status_awaitingUnpinned": {
+    "message": "It is {color}’s turn, but no AI chat is pinned. Pin one supported tab to continue."
+  },
+  "status_newGameGoodLuck": {
+    "message": "New game. Good luck!"
+  },
+  "status_gameRestored": {
+    "message": "Game restored."
+  },
+  "status_positionSet": {
+    "message": "Position set from FEN."
+  },
+  "status_gameResetUndo": {
+    "message": "Game reset — Undo"
+  },
+  "outcome_checkmateWin": {
+    "message": "Checkmate — you win as {color}! {result}"
+  },
+  "outcome_checkmateLose": {
+    "message": "Checkmate — the AI wins. {result}"
+  },
+  "outcome_stalemate": {
+    "message": "Draw by stalemate. {result}"
+  },
+  "outcome_fiftyMove": {
+    "message": "Draw by the fifty-move rule. {result}"
+  },
+  "outcome_insufficientMaterial": {
+    "message": "Draw — not enough material to mate. {result}"
+  },
+  "outcome_threefold": {
+    "message": "Draw by threefold repetition. {result}"
+  },
+  "controls_pasteFen": {
+    "message": "Paste FEN"
+  },
+  "controls_copyPosition": {
+    "message": "Copy position"
+  },
+  "library_exportAll": {
+    "message": "Export all"
+  },
+  "library_renameGame": {
+    "message": "Rename game"
+  },
+  "analysis_stopEngine": {
+    "message": "Stop"
+  },
+  "analysis_evalHeuristic": {
+    "message": "Eval: {score} (heuristic)"
+  },
+  "analysis_moveAnnouncement": {
+    "message": "{color} played {san}, {uci}"
+  },
+  "diagnostics_showDetails": {
+    "message": "Show details"
+  },
+  "diagnostics_hideDetails": {
+    "message": "Hide details"
+  },
+  "fen_setup": {
+    "message": "Set up position (FEN)"
+  },
+  "fen_apply": {
+    "message": "Apply"
+  },
+  "match_saving": {
+    "message": "Saving the finished rated game…"
+  },
+  "illegal_repeated_move": {
+    "message": "That move was already rejected in this position; choose a different legal move."
   }
 }

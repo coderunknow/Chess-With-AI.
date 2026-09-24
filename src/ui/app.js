@@ -23,6 +23,9 @@
 
 import { PIECE_GLYPHS, PIECE_NAMES, colorOf } from "../core/pieces.js";
 import { toName } from "../core/squares.js";
+import { toUci } from "../core/move.js";
+import { IllegalReason, explainIllegalMove } from "../core/illegal-move.js";
+import { formatPgn } from "../core/pgn.js";
 import { createLogger } from "../shared/log.js";
 import { MessageType, createMessage, describeRuntimeError, normaliseResponse } from "../shared/messaging.js";
 import { PLATFORMS, platformForUrl } from "../shared/platforms.js";
@@ -33,6 +36,8 @@ import { createTranslator } from "../shared/i18n.js";
 import { formatReport } from "../shared/diagnostics.js";
 import { playSound } from "../shared/sounds.js";
 import { createClock, startClock, stopClock, tickClock, formatClock } from "../shared/clock.js";
+import { StockfishEngine, clampMoveTime, clampUciElo } from "./stockfish.js";
+import { appendRatedMatch, emptyMatches, estimateRating, exportMatches, readMatches } from "../shared/matches.js";
 import {
   LAST_DELETED_KEY,
   readLibrary,
@@ -100,13 +105,36 @@ export class App {
   #renameTargetId = null;
   #announceTimer = 0;
   #lastPrompt = "";
-  #retryBackoffTimer = 0;
+  #retryPending = false;
+  #retryEpoch = 0;
+  #retryToken = 0;
+  #lastIllegalReply = null;
+  #pin = null;
+  #availableTabs = [];
+  #refreshEpoch = 0;
+  #pinMutationEpoch = 0;
+  #expectedReplyId = null;
+  #requestCounter = 0;
+  #sendInFlight = null;
+  #cancelPending = Promise.resolve();
+  #stockfish = null;
+  #stockfishFactory;
+  #stockfishBoot = null;
+  #engineEpoch = 0;
+  #engineRange = null;
+  #engineError = "";
+  #matchBook = emptyMatches();
+  #match = null;
+  #matchSaving = false;
+  #localEngineMode = false;
+  #matchFinished = false;
 
   /**
    * @param {object} refs DOM references resolved by `main.js`.
    */
-  constructor(refs) {
+  constructor(refs, { stockfishFactory = () => new StockfishEngine() } = {}) {
     this.#refs = refs;
+    this.#stockfishFactory = stockfishFactory;
     this.#session = new GameSession();
     this.#boardView = new BoardView(refs.board, {
       onSelect: (square) => void this.selectSquare(square),
@@ -122,6 +150,16 @@ export class App {
     this.#initI18n();
     this.#initClock();
     this.#initEngine();
+  }
+
+  /** Release panel-local resources (tests/unload), without changing pause or unregistering scripts. */
+  dispose() {
+    clearTimeout(this.#persistTimer);
+    clearTimeout(this.#undoDeleteTimer);
+    clearTimeout(this.#announceTimer);
+    clearInterval(this.#clockTimer);
+    this.#stopStockfish();
+    this.#engineWorker?.terminate();
   }
 
   /** @returns {GameSession} the active session (read-only use). */
@@ -155,6 +193,99 @@ export class App {
 
   #initClock() {
     this.#clockState = createClock();
+  }
+
+  #stopStockfish() {
+    this.#engineEpoch += 1;
+    this.#stockfish?.stop();
+    this.#stockfish = null;
+    this.#stockfishBoot = null;
+    this.#engineRange = null;
+  }
+
+  async #bootStockfish() {
+    if (this.#settings.paused || (this.#stockfish?.ready && this.#engineRange)) return;
+    if (this.#stockfishBoot) return this.#stockfishBoot;
+    const epoch = this.#engineEpoch;
+    const engine = this.#stockfish || this.#stockfishFactory();
+    this.#stockfish = engine;
+    this.#engineError = "";
+    this.#renderMatch();
+    const boot = (async () => {
+      try {
+        const range = await engine.boot();
+        if (epoch !== this.#engineEpoch || this.#settings.paused || this.#stockfish !== engine) return;
+        const anchor = clampUciElo(this.#settings.matchAnchorElo, range);
+        if (anchor !== this.#settings.matchAnchorElo) await this.updateSettings({ matchAnchorElo: anchor });
+        if (epoch !== this.#engineEpoch || this.#settings.paused || this.#stockfish !== engine) return;
+        this.#engineRange = range;
+        this.#renderMatch();
+      } catch (error) {
+        if (epoch !== this.#engineEpoch || this.#stockfish !== engine) return;
+        this.#engineRange = null;
+        this.#engineError = error?.message || String(error);
+        this.#renderMatch();
+      }
+    })();
+    this.#stockfishBoot = boot;
+    try {
+      await boot;
+    } finally {
+      if (this.#stockfishBoot === boot) this.#stockfishBoot = null;
+    }
+  }
+
+  #renderMatch() {
+    const refs = this.#refs.match;
+    if (!refs) return;
+    const t = this.#t || createTranslator("en");
+    if (refs.engineStatus) {
+      refs.engineStatus.textContent = this.#settings.paused
+        ? t("match.paused")
+        : this.#matchSaving
+          ? t("match.saving")
+          : this.#engineError
+            ? t("match.engineError", { detail: this.#engineError })
+            : this.#engineRange
+              ? t("match.engineReady", { min: this.#engineRange.min, max: this.#engineRange.max })
+              : t("match.loading");
+    }
+    if (refs.anchor) {
+      refs.anchor.disabled = !this.#engineRange || Boolean(this.#match) || this.#matchSaving || this.#settings.paused;
+      // Do not display a numeric Elo control until this worker has actually
+      // reported its own range. Previous ranges are cleared on engine failure.
+      refs.anchor.min = this.#engineRange ? String(this.#engineRange.min) : "";
+      refs.anchor.max = this.#engineRange ? String(this.#engineRange.max) : "";
+      refs.anchor.value = this.#engineRange ? String(this.#settings.matchAnchorElo) : "";
+    }
+    if (refs.movetime) {
+      refs.movetime.disabled = !this.#engineRange || Boolean(this.#match) || this.#matchSaving || this.#settings.paused;
+      refs.movetime.value = String(this.#settings.matchMoveTimeMs);
+    }
+    if (refs.start)
+      refs.start.disabled =
+        !this.#engineRange || Boolean(this.#match) || this.#matchSaving || this.#settings.paused || this.#busy;
+    if (refs.stop) refs.stop.hidden = !this.#match || this.#matchSaving;
+    if (refs.export) refs.export.disabled = this.#matchSaving || this.#matchBook.games.length === 0;
+    if (refs.estimate) {
+      const estimate = this.#engineRange
+        ? estimateRating(this.#matchBook.games, this.#settings.matchAnchorElo, this.#engineRange)
+        : null;
+      refs.estimate.textContent = estimate
+        ? t("match.estimate", {
+            n: estimate.games,
+            wins: estimate.wins,
+            draws: estimate.draws,
+            losses: estimate.losses,
+            rating: estimate.estimate,
+            low: estimate.lower,
+            high: estimate.upper,
+            provisional: estimate.provisional ? t("match.provisional") : "",
+            boundary: estimate.boundary ? t("match.boundary") : "",
+          })
+        : t("match.noGames");
+    }
+    if (refs.scale) refs.scale.textContent = t("match.scale");
   }
 
   #initEngine() {
@@ -230,7 +361,18 @@ export class App {
         storedSettings = {};
       }
       this.#settings = mergeSettings(storedSettings);
-      this.#engineLevel = Number(this.#settings.engineLevel) || 4;
+      this.#engineLevel = this.#settings.engineLevel;
+      this.#clockState = createClock(this.#settings.clockDurationMs);
+      if (this.#settings.paused) {
+        this.#engineWorker?.terminate();
+        this.#engineWorker = null;
+      }
+      // Corrupt match storage cannot prevent the board/library from starting.
+      try {
+        this.#matchBook = await readMatches();
+      } catch {
+        this.#matchBook = emptyMatches();
+      }
 
       // Apply theme immediately and cache to localStorage to prevent flash
       try {
@@ -315,6 +457,8 @@ export class App {
       } catch (e) {
         log.debug("refreshConnection failed", e);
       }
+      if (!this.#settings.paused) void this.#bootStockfish();
+      else this.#renderMatch();
 
       // Listen for system theme changes when theme=system
       try {
@@ -419,8 +563,93 @@ export class App {
     };
     setText("app-title", "app.title");
     setText("app-eyebrow", "app.eyebrow");
-    setText("turn-label", "app.title"); // fallback
-    // We keep many labels static for v0.2.0 but ensure t() is used for dynamic status
+    const staticLabels = {
+      "turn-label": "meta.turn",
+      "opponent-label": "meta.opponent",
+      "clock-white-label": "clock.white",
+      "clock-black-label": "clock.black",
+      undo: "controls.undo",
+      "new-game": "controls.newGame",
+      flip: "controls.flip",
+      hint: "analysis.hintButton",
+      "analyse-game": "analysis.analyseGame",
+      "copy-prompt": "status.copyPrompt",
+      "reload-tab": "status.reloadTab",
+      "connections-title": "connections.title",
+      "connections-hint": "connections.hint",
+      "refresh-tabs": "connections.refresh",
+      "unpin-tab": "connections.unpin",
+      "open-platform": "connections.openTab",
+      "moves-title": "moves.title",
+      "moves-empty": "moves.empty",
+      "copy-pgn": "controls.copyPgn",
+      "open-pgn": "controls.openPgn",
+      "library-title": "library.title",
+      "library-empty": "library.empty",
+      "library-import": "library.import",
+      "library-export-all": "library.exportAll",
+      "library-new": "library.new",
+      "analysis-title": "analysis.title",
+      "analysis-hint": "analysis.hint",
+      "analysis-heuristic-note": "analysis.heuristicNote",
+      "engine-level-label": "analysis.strength",
+      "play-vs-engine": "analysis.playVsEngine",
+      "stop-engine": "analysis.stopEngine",
+      "position-title": "position.title",
+      "copy-fen": "controls.copyFen",
+      "paste-fen": "controls.pasteFen",
+      "copy-position": "controls.copyPosition",
+      "open-settings": "controls.settings",
+      "diagnostics-title": "diagnostics.title",
+      "copy-diagnostics": "diagnostics.copyReport",
+      "promotion-title": "promotion.title",
+      "settings-title": "settings.title",
+      "settings-theme-label": "settings.theme",
+      "settings-locale-label": "settings.locale",
+      "settings-board-theme-label": "settings.boardTheme",
+      "settings-font-scale-label": "settings.fontScale",
+      "settings-density-label": "settings.density",
+      "settings-play-as-label": "settings.playAs",
+      "settings-reset": "settings.reset",
+      "pgn-title": "pgn.title",
+      "pgn-copy": "pgn.copy",
+      "pgn-load": "pgn.load",
+      "fen-dialog-title": "fen.setup",
+      "fen-apply": "fen.apply",
+      "shortcuts-title": "shortcuts.title",
+      "library-rename-title": "library.renameGame",
+      "library-rename-save": "generic.save",
+      "match-title": "match.title",
+      "match-scale": "match.scale",
+      "settings-board-group": "settings.groupBoard",
+      "settings-sound-group": "settings.groupSound",
+      "settings-clock-group": "settings.groupClock",
+      "settings-ai-group": "settings.groupAi",
+      "settings-engine-group": "settings.groupEngine",
+      "settings-max-retries-label": "settings.maxRetries",
+      "settings-send-mode-label": "settings.sendMode",
+      "settings-generation-wait-label": "settings.generationWait",
+      "settings-sound-volume-label": "settings.soundVolume",
+      "settings-clock-duration-label": "settings.clockDuration",
+      "settings-engine-level-label": "settings.localLevel",
+      "settings-stockfish-notice": "match.stockfishNotice",
+      "match-anchor-label": "match.anchor",
+      "match-movetime-label": "match.moveTime",
+      "match-start": "match.start",
+      "match-stop": "match.stop",
+      "match-export": "match.export",
+      "settings-hint": "settings.hint",
+    };
+    for (const [id, key] of Object.entries(staticLabels)) setText(id, key);
+    for (const node of document.querySelectorAll("[data-i18n]")) {
+      node.textContent = t(node.dataset.i18n);
+    }
+    document.getElementById("tab-list")?.setAttribute("aria-label", t("connections.tabList"));
+    document.getElementById("switch-side")?.setAttribute("title", t("controls.switchSideTitle"));
+    document.getElementById("board")?.setAttribute("aria-label", t("board.label"));
+    document.getElementById("fen")?.setAttribute("aria-label", t("position.fen"));
+    document.getElementById("library-search")?.setAttribute("placeholder", t("library.search"));
+    document.getElementById("pgn-text")?.setAttribute("placeholder", t("pgn.placeholder"));
   }
 
   /**
@@ -429,26 +658,116 @@ export class App {
    * @returns {Promise<void>}
    */
   async refreshConnection() {
+    const epoch = ++this.#refreshEpoch;
     try {
-      const response = await chrome.runtime.sendMessage(createMessage(MessageType.GET_ACTIVE_TAB));
-      this.#setConnection(response);
-      // Try to get diagnostics if available
-      if (response?.tabId) {
+      const response = await chrome.runtime.sendMessage(createMessage(MessageType.GET_CONNECTIONS));
+      if (epoch !== this.#refreshEpoch) return;
+      if (!response?.ok) throw new Error("Could not list the AI tabs.");
+      this.#availableTabs = Array.isArray(response.tabs) ? response.tabs : [];
+      const previousPin = this.#pin;
+      this.#pin = response.pin || null;
+      if (previousPin && !this.#pin) {
+        if (this.#match) this.#abortMatch(this.#t("match.pinLost"));
+        this.#cancelReply();
+        this.#phase = Phase.ERROR;
+        this.#message = this.#t("connections.pinLost");
+      }
+      this.#setConnection(this.#pin ? { ...this.#pin, supported: true } : null);
+      this.#renderTabs();
+      if (this.#pin?.tabId !== undefined) {
         try {
-          const diag = await chrome.tabs.sendMessage(response.tabId, { type: "GET_DIAGNOSTICS" });
+          const diag = await chrome.tabs.sendMessage(this.#pin.tabId, createMessage(MessageType.GET_DIAGNOSTICS));
+          if (epoch !== this.#refreshEpoch) return;
           if (diag?.report) {
             this.#diagnostics = diag.report;
             this.#renderDiagnostics();
           }
         } catch {
-          // ignore, content script may not have diagnostics yet
+          // Diagnostics are optional; a pinned tab can still receive an injection.
         }
       }
     } catch (error) {
-      log.debug("could not read the active tab", describeRuntimeError(error));
+      if (epoch !== this.#refreshEpoch) return;
+      log.debug("could not list the supported tabs", describeRuntimeError(error));
+      this.#pin = null;
       this.#setConnection(null);
+      this.#renderTabs();
     }
     this.#render();
+  }
+
+  #renderTabs() {
+    const { list, pinned, unpin } = this.#refs.platformBanner;
+    if (unpin) unpin.hidden = !this.#pin;
+    if (pinned) {
+      pinned.textContent = this.#pin
+        ? this.#t("connections.pinned", {
+            platform: this.#connection.label,
+            title: this.#pin.title || `#${this.#pin.tabId}`,
+          })
+        : this.#t("connections.choosePin");
+    }
+    if (!list) return;
+    const fragment = document.createDocumentFragment();
+    if (!this.#availableTabs.length) {
+      const empty = document.createElement("p");
+      empty.className = "hint";
+      empty.textContent = this.#t("connections.noTabs");
+      fragment.append(empty);
+    }
+    for (const tab of this.#availableTabs) {
+      if (!Number.isInteger(tab.tabId) || !platformForUrl(tab.url)) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `tab-row${this.#pin?.tabId === tab.tabId ? " is-pinned" : ""}`;
+      button.dataset.tabId = String(tab.tabId);
+      button.setAttribute("aria-pressed", String(this.#pin?.tabId === tab.tabId));
+      const name = document.createElement("span");
+      name.className = "tab-title";
+      name.textContent = `${this.#pin?.tabId === tab.tabId ? this.#t("connections.pinMarker") + " " : ""}${tab.platform || platformForUrl(tab.url).name} — ${tab.title || `#${tab.tabId}`}`;
+      const host = document.createElement("span");
+      host.className = "tab-host";
+      host.textContent = tab.host || new URL(tab.url).host;
+      button.append(name, host);
+      fragment.append(button);
+    }
+    list.replaceChildren(fragment);
+  }
+
+  async pinTab(tabId) {
+    const epoch = ++this.#pinMutationEpoch;
+    ++this.#refreshEpoch; // an older tab-list response cannot restore the old pin
+    if (this.#match && tabId !== this.#match.tabId) this.#abortMatch(this.#t("match.pinLost"));
+    if (this.#pin?.tabId !== tabId) this.#cancelReply();
+    const response = await chrome.runtime.sendMessage(createMessage(MessageType.PIN_TAB, { tabId }));
+    if (epoch !== this.#pinMutationEpoch) return;
+    if (!response?.ok) {
+      this.#phase = Phase.ERROR;
+      this.#message = this.#t("connections.pinFailed");
+    } else {
+      this.#pin = response.pin;
+      this.#setConnection({ ...response.pin, supported: true });
+      this.#message = this.#t("connections.pinned", {
+        platform: this.#connection.label,
+        title: this.#pin.title || `#${tabId}`,
+      });
+      this.#phase = Phase.IDLE;
+    }
+    await this.refreshConnection();
+  }
+
+  async unpinTab() {
+    const epoch = ++this.#pinMutationEpoch;
+    ++this.#refreshEpoch;
+    if (this.#match) this.#abortMatch(this.#t("match.pinLost"));
+    this.#cancelReply();
+    await chrome.runtime.sendMessage(createMessage(MessageType.UNPIN_TAB));
+    if (epoch !== this.#pinMutationEpoch) return;
+    this.#pin = null;
+    this.#setConnection(null);
+    this.#message = this.#t("connections.unpinned");
+    this.#phase = Phase.IDLE;
+    await this.refreshConnection();
   }
 
   /**
@@ -458,8 +777,8 @@ export class App {
    * @returns {Promise<void>}
    */
   async selectSquare(square) {
-    if (this.#busy) {
-      log.debug("busy, ignoring selectSquare");
+    if (this.#busy || this.#settings.paused || this.#matchFinished) {
+      log.debug("busy, paused or finished, ignoring selectSquare");
       return;
     }
 
@@ -512,7 +831,7 @@ export class App {
   }
 
   async handleDrop(from, to) {
-    if (this.#busy) return;
+    if (this.#busy || this.#settings.paused || this.#matchFinished) return;
     const session = this.#session;
     if (session.isGameOver || !session.isPlayerTurn) return;
     if (!session.canSelect(from)) return;
@@ -526,68 +845,79 @@ export class App {
     await this.#playHumanMove(from, to);
   }
 
-  /**
-   * @param {{move?: string, candidates?: string[], diagnostics?:object, text?:string, noMove?:boolean}} payload
-   * @returns {Promise<void>}
-   */
+  /** A parsed reply delivered ONLY by the expected pinned content script. */
   async handleAiMove(payload) {
     const session = this.#session;
-    if (session.isGameOver) {
-      return;
-    }
-
-    // Handle plan reply with no move
-    if (payload.noMove) {
-      log.info("AI replied with no move, asking again with stricter instruction");
-      const canRetry = this.#settings.autoRetry && session.retryCount < this.#settings.maxRetries;
-      if (!canRetry) {
-        this.#phase = Phase.ERROR;
-        this.#message = this.#t
-          ? this.#t("status.illegalAi", { move: "no move" })
-          : "The AI did not send a move. Ask again with a stricter instruction.";
-        this.#render();
-        return;
-      }
-      const attempt = session.registerRetry();
-      const strictPrompt = `${this.#movePrompt()}\n\nIMPORTANT: Reply with exactly one move in square brackets, like [e7e5]. Put the bracketed move first. Do not explain.`;
-      await this.#sendPrompt(strictPrompt, { expected: "ai-move", retry: attempt });
-      return;
-    }
-
+    if (this.#settings.paused || this.#matchFinished || session.isGameOver) return;
+    if (this.#match && (session.turn !== this.#match.aiColor || this.#connection.tabId !== this.#match.tabId)) return;
     if (payload.diagnostics) {
       this.#diagnostics = payload.diagnostics;
       this.#renderDiagnostics();
     }
+    this.#expectedReplyId = null;
 
-    const candidates = normaliseCandidates(payload);
-    if (candidates.length === 0) {
+    if (payload.resigned) {
+      if (this.#match && this.#match.stockfishMoves > 0 && this.#match.chatMoves > 0) {
+        await this.#finishMatch(this.#match.engineColor === "w" ? "1-0" : "0-1", "resignation");
+      } else if (this.#match) {
+        this.#abortMatch(this.#t("match.unratedProtocol"));
+      } else {
+        this.#phase = Phase.ERROR;
+        this.#message = this.#t("status.aiResigned");
+        this.#render();
+      }
+      return;
+    }
+    if (payload.repeated && payload.move) {
+      await this.#retryAfterIllegalMove(payload.move, { code: IllegalReason.REPEATED_MOVE, facts: {} });
+      return;
+    }
+    if (payload.noMove) {
+      await this.#retryAfterIllegalMove(this.#t("status.noMove"), { code: IllegalReason.MALFORMED, facts: {} });
       return;
     }
 
-    const result = session.playFirstAvailable(candidates);
+    const candidates = normaliseCandidates(payload);
+    if (!candidates.length) {
+      await this.#retryAfterIllegalMove(this.#t("status.noMove"), { code: IllegalReason.MALFORMED, facts: {} });
+      return;
+    }
+    // First bracketed UCI wins; a rejected first answer must not let a later
+    // quoted example or legal-list item masquerade as the actual reply.
+    if (session.rejectedMoves.includes(candidates[0])) {
+      await this.#retryAfterIllegalMove(candidates[0], { code: IllegalReason.REPEATED_MOVE, facts: {} });
+      return;
+    }
+    const result = session.playFirstAvailable([candidates[0]]);
     if (result.ok) {
-      log.info(`AI played ${result.entry.uci} (${result.entry.san})`);
       this.#phase = Phase.IDLE;
       this.#message = "";
+      this.#lastIllegalReply = null;
       this.#clearSelection();
       this.#hintMove = null;
+      if (this.#match) this.#match.chatMoves += 1;
       this.#persist();
       this.#render();
       this.#updateBadge();
       this.#playSoundForMove(result.entry);
       this.#updateClockAfterMove();
       this.#announceMove(result.entry);
+      if (this.#match) {
+        if (session.outcome.over) await this.#finishMatch(session.outcome.result, session.outcome.reason);
+        else await this.#advanceMatch();
+      }
       return;
     }
-
     if (result.code === MoveError.NOT_AI_TURN) {
-      this.#message = `Ignored [${candidates[0]}]: it is your turn.`;
+      this.#message = this.#t("status.outOfTurn", { move: candidates[0] });
       this.#render();
       return;
     }
-
     if (result.code === MoveError.ILLEGAL) {
-      await this.#retryAfterIllegalMove(candidates[0]);
+      await this.#retryAfterIllegalMove(
+        candidates[0],
+        result.reason || explainIllegalMove(session.position, candidates[0]),
+      );
     }
   }
 
@@ -595,13 +925,17 @@ export class App {
     if (!this.#settings.soundEnabled) return;
     try {
       if (entry.mate) {
-        playSound("gameOver");
+        playSound("gameOver", this.#settings.soundVolume);
       } else if (entry.check) {
-        playSound("check");
-      } else if (entry.uci.includes("x") || entry.san.includes("x")) {
-        playSound("capture");
+        playSound("check", this.#settings.soundVolume);
+      } else if (entry.promotion) {
+        playSound("promotion", this.#settings.soundVolume);
+      } else if (/^O-O/.test(entry.san)) {
+        playSound("castle", this.#settings.soundVolume);
+      } else if (entry.san.includes("x")) {
+        playSound("capture", this.#settings.soundVolume);
       } else {
-        playSound("move");
+        playSound("move", this.#settings.soundVolume);
       }
     } catch {
       // ignore
@@ -661,8 +995,8 @@ export class App {
   }
 
   #announceMove(entry) {
-    const color = entry.color === "w" ? "White" : "Black";
-    this.#announce(`${color} played ${entry.san}, ${entry.uci}`);
+    const color = this.#t(entry.color === "w" ? "clock.white" : "clock.black");
+    this.#announce(this.#t("analysis.moveAnnouncement", { color, san: entry.san, uci: entry.uci }));
   }
 
   /**
@@ -672,40 +1006,56 @@ export class App {
    * @returns {Promise<void>}
    */
   async requestAiMove() {
-    if (this.#busy) return;
-    if (this.#session.isGameOver || this.#session.isPlayerTurn) {
-      return;
-    }
-    const prompt =
-      this.#session.plyCount === 0
-        ? buildOpeningPrompt({ aiColor: this.#session.aiColor, fen: this.#session.fen })
+    if (
+      this.#busy ||
+      this.#retryPending ||
+      this.#match ||
+      this.#matchFinished ||
+      this.#settings.paused ||
+      this.#localEngineMode ||
+      this.#expectedReplyId !== null
+    )
+      return; // an unanswered one-shot request must never be sent a second time
+    if (this.#session.isGameOver || this.#session.isPlayerTurn) return;
+    const session = this.#session;
+    // After an illegal reply, Ask again is ONE corrective prompt, not another
+    // opening/move request and not a new automatic retry cycle.
+    const correction = this.#phase === Phase.ERROR ? this.#lastIllegalReply : null;
+    const prompt = correction
+      ? this.#correctionPrompt(correction.uci, correction.reason)
+      : session.plyCount === 0
+        ? buildOpeningPrompt({ aiColor: session.aiColor, fen: session.fen })
         : this.#movePrompt();
-    this.#lastPrompt = prompt;
     await this.#sendPrompt(prompt, { expected: "ai-move" });
   }
 
   /** Starts a new game with the configured colour. */
   resetGame() {
+    if (this.#match) this.#abortMatch(this.#t("match.unratedStopped"));
+    this.#cancelReply();
+    this.#matchFinished = false;
+    this.#localEngineMode = false;
+    this.#lastIllegalReply = null;
     // Store for undo
     this.#lastGameSnapshot = this.#session.snapshot();
     this.#session.reset({ playerColor: this.#settings.playerColor });
     this.#flipOverride = null;
     this.#clearSelection();
     this.#phase = Phase.IDLE;
-    this.#message = this.#t ? this.#t("status.newGame") + ". Good luck!" : "New game. Good luck!";
+    this.#message = this.#t("status.newGameGoodLuck");
     this.#hintMove = null;
     this.#evalScore = null;
     this.#persist();
     this.#render();
     this.#updateBadge();
-    this.#showUndoDelete("Game reset — Undo", () => this.undoDeleteGame());
+    this.#showUndoDelete(this.#t("status.gameResetUndo"), () => this.undoDeleteGame());
   }
 
   undoDeleteGame() {
     if (!this.#lastGameSnapshot) return;
     this.#session = GameSession.fromSnapshot(this.#lastGameSnapshot, { playerColor: this.#settings.playerColor });
     this.#lastGameSnapshot = null;
-    this.#message = "Game restored.";
+    this.#message = this.#t("status.gameRestored");
     this.#persist();
     this.#render();
     this.#updateBadge();
@@ -713,7 +1063,9 @@ export class App {
 
   /** Undoes the last move pair. */
   undo() {
-    if (this.#busy) return;
+    if (this.#busy || this.#match) return;
+    this.#cancelReply();
+    this.#lastIllegalReply = null;
     const result = this.#session.undo();
     this.#phase = Phase.IDLE;
     this.#clearSelection();
@@ -740,6 +1092,11 @@ export class App {
    * @returns {{ok: boolean, error: string}}
    */
   loadPgn(text) {
+    if (this.#match) return { ok: false, error: this.#t("match.running") };
+    this.#cancelReply();
+    this.#matchFinished = false;
+    this.#localEngineMode = false;
+    this.#lastIllegalReply = null;
     const result = this.#session.loadPgn(text);
     if (!result.ok) {
       return { ok: false, error: result.error };
@@ -762,7 +1119,15 @@ export class App {
   async updateSettings(patch) {
     const previous = this.#settings;
     this.#settings = mergeSettings(patch, this.#settings);
-    this.#engineLevel = Number(this.#settings.engineLevel) || 4;
+    this.#engineLevel = this.#settings.engineLevel;
+    if (
+      this.#match &&
+      (previous.playerColor !== this.#settings.playerColor ||
+        previous.sendMode !== this.#settings.sendMode ||
+        previous.matchAnchorElo !== this.#settings.matchAnchorElo)
+    ) {
+      this.#abortMatch(this.#t("match.unratedStopped"));
+    }
     this.#applySettingsToDialog();
     this.#applyTheme();
     this.#cacheTheme();
@@ -770,12 +1135,15 @@ export class App {
     await writeValue(SETTINGS_KEY, this.#settings);
 
     if (previous.playerColor !== this.#settings.playerColor) {
+      this.#cancelReply();
+      this.#matchFinished = false;
+      this.#localEngineMode = false;
+      this.#lastIllegalReply = null;
       this.#flipOverride = null;
       this.#session.reset({ playerColor: this.#settings.playerColor });
-      this.#message =
-        this.#settings.playerColor === "w"
-          ? "You play White from now on. New game started."
-          : "You play Black from now on. New game started — ask the AI to open.";
+      this.#message = this.#t("status.sideNewGame", {
+        color: this.#t(this.#settings.playerColor === "w" ? "clock.white" : "clock.black"),
+      });
       this.#phase = Phase.IDLE;
       this.#persist();
     }
@@ -786,7 +1154,7 @@ export class App {
 
     if (previous.clockEnabled !== this.#settings.clockEnabled) {
       if (this.#settings.clockEnabled) {
-        this.#clockState = createClock();
+        this.#clockState = createClock(this.#settings.clockDurationMs);
         this.#startClockTick();
       } else {
         clearInterval(this.#clockTimer);
@@ -794,13 +1162,46 @@ export class App {
       }
     }
 
+    if (previous.clockDurationMs !== this.#settings.clockDurationMs) {
+      this.#clockState = createClock(this.#settings.clockDurationMs);
+    }
     if (previous.locale !== this.#settings.locale) {
       const effective = resolveLocale(this.#settings.locale);
       this.#locale = effective;
       this.#t = createTranslator(effective);
       this.#applyI18n();
+      this.#renderTabs();
+      this.#renderLibrary();
     }
 
+    if (previous.paused !== this.#settings.paused) {
+      if (this.#settings.paused) {
+        this.#cancelReply();
+        if (this.#match) this.#abortMatch(this.#t("match.unratedStopped"));
+        this.#engineWorker?.terminate();
+        this.#engineWorker = null;
+        this.#stopStockfish();
+        this.#clockState = stopClock(this.#clockState);
+        this.#message = this.#t("status.paused");
+      } else {
+        this.#initEngine();
+        void this.#bootStockfish();
+        this.#message = this.#t("status.resumed");
+      }
+      this.#phase = Phase.IDLE;
+      // Storage events also reach content scripts when the panel is closed.
+      // The explicit message takes effect immediately on the pinned page.
+      const tabs = this.#availableTabs.length ? this.#availableTabs : this.#pin ? [this.#pin] : [];
+      await Promise.allSettled(
+        tabs.map((tab) =>
+          chrome.tabs.sendMessage(tab.tabId, createMessage(MessageType.SET_PAUSED, { paused: this.#settings.paused })),
+        ),
+      );
+      void chrome.runtime.sendMessage(createMessage(MessageType.PAUSE_CHANGED)).catch(() => undefined);
+    }
+
+    this.#renderTabs();
+    this.#renderMatch();
     this.#render();
     this.#renderClock();
   }
@@ -818,6 +1219,7 @@ export class App {
   async #playHumanMove(from, to) {
     if (this.#busy) return;
     const session = this.#session;
+    const epoch = this.#retryEpoch;
     const promotions = session.position.legalMovesFrom(from).filter((move) => move.to === to && move.promotion);
 
     let promotion = "";
@@ -830,6 +1232,16 @@ export class App {
       }
     }
 
+    // The promotion dialog can stay open while a game is reset, paused or
+    // replaced. The same GameSession object is mutated in place on reset.
+    if (
+      session !== this.#session ||
+      epoch !== this.#retryEpoch ||
+      this.#settings.paused ||
+      this.#busy ||
+      !session.isPlayerTurn
+    )
+      return;
     const uci = `${toName(from)}${toName(to)}${promotion}`;
     const result = session.playHumanMove(uci);
     if (!result.ok) {
@@ -841,6 +1253,7 @@ export class App {
 
     this.#clearSelection();
     this.#message = "";
+    this.#lastIllegalReply = null;
     this.#persist();
     this.#updateBadge();
     this.#playSoundForMove(result.entry);
@@ -853,6 +1266,10 @@ export class App {
       return;
     }
 
+    if (this.#localEngineMode) {
+      await this.#playLocalEngineTurn();
+      return;
+    }
     this.#lastPrompt = this.#movePrompt();
     await this.#sendPrompt(this.#lastPrompt, { expected: "ai-move" });
   }
@@ -870,128 +1287,230 @@ export class App {
     });
   }
 
-  /**
-   * @param {string} illegalMove
-   * @returns {Promise<void>}
-   */
-  async #retryAfterIllegalMove(illegalMove) {
+  #correctionPrompt(illegalMove, reason) {
     const session = this.#session;
-    const canRetry = this.#settings.autoRetry && session.retryCount < this.#settings.maxRetries;
-
-    if (!canRetry) {
-      this.#phase = Phase.ERROR;
-      this.#message = this.#t
-        ? this.#t("status.illegalAi", { move: illegalMove })
-        : `The AI answered [${illegalMove}], which is not legal here. Ask again or adjust the position.`;
-      this.#render();
-      return;
-    }
-
-    const attempt = session.registerRetry();
-    log.info(`asking the AI again (attempt ${attempt})`);
-    const prompt = buildRetryPrompt({
+    return buildRetryPrompt({
       fen: session.fen,
       uci: illegalMove,
       aiColor: session.aiColor,
       history: session.moveListText,
+      reason,
+      legalMoves: session.position.legalMoves().map(toUci),
+      rejectedMoves: session.rejectedMoves,
     });
-
-    // Bounded backoff: 500ms, 1s, 2s
-    const backoff = Math.min(500 * Math.pow(2, attempt - 1), 2000);
-    clearTimeout(this.#retryBackoffTimer);
-    await new Promise((resolve) => {
-      this.#retryBackoffTimer = window.setTimeout(resolve, backoff);
-    });
-
-    await this.#sendPrompt(prompt, { expected: "ai-move", retry: attempt });
   }
 
-  /**
-   * Injects a prompt into the active AI tab.
-   *
-   * @param {string} prompt
-   * @param {object} [options]
-   * @param {string} [options.expected] diagnostic label for the request.
-   * @param {number} [options.retry] retry attempt number.
-   * @returns {Promise<boolean>} true when the tab accepted the prompt.
-   */
-  async #sendPrompt(prompt, { expected = "prompt", retry = 0 } = {}) {
-    if (this.#busy) {
-      log.debug("already sending, ignoring");
-      return false;
+  async #retryAfterIllegalMove(illegalMove, reason) {
+    const session = this.#session;
+    this.#lastIllegalReply = { uci: illegalMove, reason };
+    const explanation = this.#t(`illegal.${reason.code}`, reason.facts);
+    const canRetry = this.#settings.autoRetry && session.retryCount < this.#settings.maxRetries;
+    this.#message = this.#t("status.illegalReason", { move: illegalMove, reason: explanation });
+    if (!canRetry) {
+      this.#phase = Phase.ERROR;
+      if (this.#match) this.#abortMatch(`${this.#message} ${this.#t("match.unratedProtocol")}`);
+      else this.#render();
+      return;
     }
 
-    if (!this.#connection.supported || !Number.isInteger(this.#connection.tabId)) {
-      log.debug("no supported AI tab is active; the prompt was not sent");
-      this.#phase = Phase.IDLE;
-      this.#message = this.#t ? this.#t("status.noAi") : "No AI chat detected.";
-      this.#render();
-      // Show copy prompt fallback
-      this.#showCopyPrompt(prompt);
-      return false;
-    }
-
-    this.#busy = true;
-    this.#phase = Phase.SENDING;
-    this.#message =
-      retry > 0
-        ? this.#t
-          ? this.#t("status.retrying", { attempt: retry })
-          : `Asking the AI again (attempt ${retry})…`
-        : "";
-    this.#render();
-
+    const attempt = session.registerRetry();
+    const prompt = this.#correctionPrompt(illegalMove, reason);
+    this.#phase = Phase.ERROR;
+    this.#render(); // display the concrete broken rule during backoff
+    const backoff = Math.min(500 * Math.pow(2, attempt - 1), 2000);
+    const epoch = this.#retryEpoch;
+    const token = ++this.#retryToken;
+    const match = this.#match;
+    this.#retryPending = true;
     try {
-      const tabId = /** @type {number} */ (this.#connection.tabId);
-      await this.#ensureContentScript(tabId);
-      const response = normaliseResponse(
-        await chrome.tabs.sendMessage(tabId, createMessage(MessageType.SEND_CHESS_PROMPT, { prompt, expected })),
-      );
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, backoff);
+      });
+      if (
+        epoch !== this.#retryEpoch ||
+        this.#settings.paused ||
+        (match && (this.#match !== match || this.#connection.tabId !== match.tabId))
+      )
+        return;
+      const sent = await this.#sendPrompt(prompt, {
+        expected: "ai-move",
+        retry: attempt,
+        match: Boolean(match),
+        reasonText: explanation,
+      });
+      if (!sent && match && this.#match === match) this.#abortMatch(this.#t("match.unratedProtocol"));
+    } finally {
+      if (token === this.#retryToken) this.#retryPending = false;
+      this.#render();
+    }
+  }
 
-      if (!response.ok) {
-        this.#phase = Phase.ERROR;
-        this.#message = response.error;
-        this.#diagnostics = response.diagnostics || null;
-        this.#renderDiagnostics();
-        // Show copy prompt if composer missing
-        if (response.error.toLowerCase().includes("input box") || response.error.toLowerCase().includes("composer")) {
-          this.#showCopyPrompt(prompt);
-        }
+  /** Serialize requests: even a fast AI reply cannot overlap two bridge sends. */
+  async #sendPrompt(prompt, options = {}) {
+    const epoch = this.#retryEpoch;
+    const session = this.#session;
+    while (this.#sendInFlight) await this.#sendInFlight;
+    if (epoch !== this.#retryEpoch || session !== this.#session) return false;
+    const operation = this.#sendPromptOnce(prompt, options);
+    this.#sendInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.#sendInFlight === operation) this.#sendInFlight = null;
+    }
+  }
+
+  /** Send to the live, explicitly pinned tab only. Never follow focus. */
+  async #sendPromptOnce(prompt, { expected = "prompt", retry = 0, match = false, reasonText = "" } = {}) {
+    if ((this.#busy && !match) || this.#settings.paused || this.#expectedReplyId !== null) {
+      if (this.#settings.paused) {
+        this.#message = this.#t("status.paused");
+        this.#showCopyPrompt(prompt);
         this.#render();
+      }
+      return false;
+    }
+    if (!this.#connection.supported || !Number.isInteger(this.#connection.tabId)) {
+      this.#phase = Phase.ERROR;
+      this.#message = this.#t("connections.choosePin");
+      this.#showCopyPrompt(prompt);
+      this.#render();
+      return false;
+    }
+
+    const epoch = this.#retryEpoch;
+    const tabId = this.#connection.tabId;
+    const platformId = this.#connection.platform;
+    if (!match) this.#busy = true;
+    try {
+      // An earlier cancellation MUST arrive before this new request. Otherwise
+      // its delayed CANCEL_REPLY could stop the new observer after it starts.
+      await this.#cancelPending;
+      if (epoch !== this.#retryEpoch || this.#settings.paused) return false;
+
+      // The background validates existence/host at send time, not the active
+      // browser window. Focus changes cannot silently retarget a prompt.
+      let target;
+      try {
+        target = await chrome.runtime.sendMessage(createMessage(MessageType.GET_ACTIVE_TAB));
+      } catch {
+        target = null;
+      }
+      if (epoch !== this.#retryEpoch || this.#settings.paused) return false;
+      if (
+        !target?.supported ||
+        target.tabId !== tabId ||
+        target.platform !== platformId ||
+        this.#connection.tabId !== tabId
+      ) {
+        this.#cancelReply();
+        this.#pin = null;
+        this.#setConnection(null);
+        this.#phase = Phase.ERROR;
+        this.#message = this.#t("connections.pinLost");
+        this.#showCopyPrompt(prompt);
+        this.#renderTabs();
         return false;
       }
 
-      this.#phase = Phase.AWAITING;
-      this.#message = "";
-      this.#diagnostics = response.diagnostics || this.#diagnostics;
-      this.#renderDiagnostics();
-      this.#busy = false;
+      const requestId = ++this.#requestCounter;
+      this.#expectedReplyId = requestId;
+      this.#lastPrompt = prompt;
+      this.#phase = Phase.SENDING;
+      this.#message =
+        retry > 0
+          ? this.#t("status.retryReason", { attempt: retry, reason: reasonText })
+          : this.#t("status.sending", { platform: this.#connection.label });
       this.#render();
+
+      await this.#ensureContentScript(tabId, target.url, platformId);
+      if (epoch !== this.#retryEpoch || this.#settings.paused || this.#connection.tabId !== tabId) return false;
+      const raw = await chrome.tabs.sendMessage(
+        tabId,
+        createMessage(MessageType.SEND_CHESS_PROMPT, {
+          prompt,
+          expected,
+          requestId,
+          rejectedMoves: this.#session.rejectedMoves,
+        }),
+      );
+      if (epoch !== this.#retryEpoch) return false;
+      const response = normaliseResponse(raw);
+      if (!response.ok || this.#settings.paused) {
+        if (this.#expectedReplyId === requestId) this.#expectedReplyId = null;
+        this.#phase = Phase.ERROR;
+        const errorKeys = {
+          "input-missing": "status.composerMissing",
+          "type-failed": "status.typeFailed",
+          "verify-failed": "status.verifyFailed",
+          "submit-failed": "status.submitFailed",
+          "generation-timeout": "status.generationTimeout",
+        };
+        this.#message = this.#settings.paused
+          ? this.#t("status.paused")
+          : this.#t(errorKeys[raw?.result] || "status.sendFailure", { detail: response.error });
+        this.#diagnostics = raw?.diagnostics || null;
+        this.#renderDiagnostics();
+        if (raw?.result === "generation-timeout") {
+          let copied = Boolean(raw.copied);
+          if (!copied) {
+            try {
+              await navigator.clipboard.writeText(prompt);
+              copied = true;
+            } catch {
+              /* Copy button remains. */
+            }
+          }
+          if (epoch !== this.#retryEpoch) return false;
+          if (copied) this.#message = this.#t("status.timeoutCopied");
+        }
+        this.#showCopyPrompt(prompt);
+        return false;
+      }
+      // A fast AI reply can arrive before send acknowledgement; do not restore
+      // AWAITING on top of its accepted reply or the next serialized request.
+      if (this.#expectedReplyId !== requestId) return true;
+      this.#phase = Phase.AWAITING;
+      if (raw?.manual) {
+        this.#message = raw.copied ? this.#t("status.manualCopied") : this.#t("status.manualSend");
+        this.#showCopyPrompt(prompt);
+      } else {
+        this.#message = "";
+        this.#hideCopyPrompt();
+      }
+      this.#diagnostics = raw?.diagnostics || this.#diagnostics;
+      this.#renderDiagnostics();
       return true;
     } catch (error) {
+      if (epoch !== this.#retryEpoch) return false;
+      this.#expectedReplyId = null;
       const detail = describeRuntimeError(error) || String(error);
       this.#phase = Phase.ERROR;
-      this.#message = this.#t ? this.#t("status.couldNotReach", { detail }) : `Could not reach the AI tab: ${detail}`;
-      // Detect content script missing
+      this.#message = this.#t("status.couldNotReach", { detail });
       if (detail.toLowerCase().includes("receiving end") || detail.toLowerCase().includes("could not establish")) {
-        this.#message = this.#t
-          ? this.#t("status.contentMissing")
-          : "Content script not found — reload the AI tab to connect.";
+        this.#message = this.#t("status.contentMissing");
         this.#showReloadTab();
-      } else {
-        this.#showCopyPrompt(prompt);
       }
-      this.#busy = false;
-      this.#render();
+      this.#showCopyPrompt(prompt);
       return false;
     } finally {
-      this.#busy = false;
-      // Ensure final render if not already
-      try {
-        this.#render();
-      } catch {
-        // ignore in test teardown
-      }
+      if (!match && epoch === this.#retryEpoch) this.#busy = false;
+      this.#render();
+    }
+  }
+
+  /** End the single expected reply without unloading its content script. */
+  #cancelReply() {
+    this.#expectedReplyId = null;
+    this.#retryEpoch += 1;
+    this.#retryToken += 1;
+    this.#retryPending = false;
+    this.#busy = false;
+    const tabId = this.#connection.tabId;
+    if (Number.isInteger(tabId)) {
+      this.#cancelPending = this.#cancelPending
+        .then(() => chrome.tabs.sendMessage(tabId, createMessage(MessageType.CANCEL_REPLY)))
+        .catch(() => undefined);
     }
   }
 
@@ -1040,29 +1559,54 @@ export class App {
   }
 
   /**
-   * Makes sure the bridge script is present in the tab.
+   * Wait for the actual bridge to acknowledge this page before sending. The
+   * registered bootstrap uses a dynamic import, so executeScript can finish
+   * before its message listener exists. A missing/stale PING is never proof
+   * that it is safe to submit a prompt to the tab.
    *
    * @param {number} tabId
+   * @param {string} url URL validated by the pin resolver just before sending
+   * @param {string} platformId
    * @returns {Promise<void>}
    */
-  async #ensureContentScript(tabId) {
-    try {
-      const pong = await chrome.tabs.sendMessage(tabId, createMessage(MessageType.PING));
-      if (pong?.diagnostics) {
-        this.#diagnostics = pong.diagnostics;
-        this.#renderDiagnostics();
+  async #ensureContentScript(tabId, url, platformId) {
+    const ping = async () => {
+      try {
+        return await chrome.tabs.sendMessage(tabId, createMessage(MessageType.PING));
+      } catch {
+        return null;
       }
-      return;
-    } catch {
-      log.debug("content script missing, injecting");
-    }
+    };
+    const accept = (pong) => {
+      if (pong?.ok && pong.url && pong.url !== url) {
+        throw new Error("The pinned tab navigated before its chess prompt could be sent.");
+      }
+      if (pong?.ok && pong.paused) throw new Error("The content script is paused.");
+      if (pong?.ok && pong.url === url && pong.platform === platformId) {
+        if (pong.diagnostics) {
+          this.#diagnostics = pong.diagnostics;
+          this.#renderDiagnostics();
+        }
+        return true;
+      }
+      return false;
+    };
 
+    if (accept(await ping())) return;
+    log.debug("content script missing or outdated, injecting");
     try {
       await chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT_FILE] });
     } catch (error) {
       log.warn("could not inject the content script", describeRuntimeError(error));
       throw error;
     }
+    // Only the PING is retried, never SEND_CHESS_PROMPT. This accommodates a
+    // cold dynamic import without risking a double submission.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (accept(await ping())) return;
+      if (attempt < 19) await new Promise((resolve) => window.setTimeout(resolve, 100));
+    }
+    throw new Error("The content script did not acknowledge the pinned tab.");
   }
 
   /**
@@ -1137,9 +1681,10 @@ export class App {
   #setConnection(description) {
     const platform = platformForUrl(description?.url || "") || null;
     this.#connection = {
-      supported: Boolean(description?.supported ?? platform),
+      supported: Boolean(description?.supported && platform && Number.isInteger(description?.tabId)),
       platform: platform?.id || "",
       label: platform?.name || "",
+      title: typeof description?.title === "string" ? description.title : "",
       tabId: Number.isInteger(description?.tabId) ? /** @type {number} */ (description.tabId) : null,
       url: description?.url || "",
     };
@@ -1173,6 +1718,11 @@ export class App {
       this.#flipOverride = !this.#effectiveFlipped();
       this.#render();
     });
+    controls.switchSide?.addEventListener(
+      "click",
+      () => void this.switchSide(this.#settings.playerColor === "w" ? "b" : "w"),
+    );
+    controls.pause?.addEventListener("click", () => void this.updateSettings({ paused: !this.#settings.paused }));
     controls.askAi.addEventListener("click", () => void this.requestAiMove());
     controls.copyPgn.addEventListener("click", () => void this.#copyPgn());
     controls.openPgn.addEventListener("click", () => this.#openPgnDialog());
@@ -1181,6 +1731,26 @@ export class App {
       () => void this.#copyText(this.#session.fen, this.#t ? this.#t("status.fenCopied") : "FEN copied."),
     );
     controls.statusAction.addEventListener("click", () => void this.#runStatusAction());
+    platformBanner.refresh?.addEventListener("click", () => void this.refreshConnection());
+    platformBanner.unpin?.addEventListener("click", () => void this.unpinTab());
+    platformBanner.list?.addEventListener("click", (event) => {
+      const button = event.target?.closest?.("[data-tab-id]");
+      const tabId = Number(button?.dataset?.tabId);
+      if (Number.isInteger(tabId) && button) void this.pinTab(tabId);
+    });
+    if (this.#refs.match) {
+      const match = this.#refs.match;
+      match.anchor?.addEventListener("change", (event) => {
+        if (!this.#engineRange) return;
+        void this.updateSettings({ matchAnchorElo: clampUciElo(event.target.value, this.#engineRange) });
+      });
+      match.movetime?.addEventListener("change", (event) => {
+        void this.updateSettings({ matchMoveTimeMs: clampMoveTime(event.target.value) });
+      });
+      match.start?.addEventListener("click", () => void this.startRatedMatch());
+      match.stop?.addEventListener("click", () => this.stopRatedMatch());
+      match.export?.addEventListener("click", () => void this.exportRatedMatches());
+    }
 
     if (controls.copyPrompt) {
       controls.copyPrompt.addEventListener(
@@ -1226,7 +1796,7 @@ export class App {
     settingsDialog.root.addEventListener("close", () => this.#render());
     settingsDialog.controls.side.addEventListener("change", (event) => {
       const value = /** @type {HTMLSelectElement} */ (event.target).value;
-      void this.updateSettings({ playerColor: value === "b" ? "b" : "w" });
+      void this.switchSide(value === "b" ? "b" : "w");
     });
     settingsDialog.controls.theme.addEventListener("change", (event) => {
       const value = /** @type {HTMLSelectElement} */ (event.target).value;
@@ -1260,9 +1830,24 @@ export class App {
       settingsDialog.controls.engineLevel.addEventListener("change", (event) => {
         const value = Number(/** @type {HTMLSelectElement} */ (event.target).value);
         void this.updateSettings({ engineLevel: value });
-        this.#engineLevel = value;
       });
     }
+    if (this.#refs.analysis?.level) {
+      this.#refs.analysis.level.addEventListener("change", (event) => {
+        void this.updateSettings({ engineLevel: Number(event.target.value) });
+      });
+    }
+    const numberSetting = (element, key, convert = Number) =>
+      element?.addEventListener("change", (event) => {
+        void this.updateSettings({ [key]: convert(event.target.value) });
+      });
+    numberSetting(settingsDialog.controls.maxRetries, "maxRetries");
+    numberSetting(settingsDialog.controls.soundVolume, "soundVolume");
+    numberSetting(settingsDialog.controls.clockDuration, "clockDurationMs", (minutes) => Number(minutes) * 60000);
+    numberSetting(settingsDialog.controls.generationWait, "generationWaitMs", (seconds) => Number(seconds) * 1000);
+    settingsDialog.controls.sendMode?.addEventListener("change", (event) => {
+      void this.updateSettings({ sendMode: event.target.value });
+    });
 
     for (const input of settingsDialog.controls.toggles) {
       input.addEventListener("change", () => {
@@ -1358,29 +1943,48 @@ export class App {
       // ignore in test
     }
 
-    chrome.runtime.onMessage.addListener((message) => {
-      if (message?.type === MessageType.AI_MOVE) {
+    chrome.runtime.onMessage.addListener((message, sender) => {
+      if (message?.type === MessageType.PIN_CHANGED) {
+        if (!message.pin) {
+          // The old tab has gone; never follow the newly focused chat.
+          if (this.#match) this.#abortMatch(this.#t("match.pinLost"));
+          this.#cancelReply();
+          this.#pin = null;
+          this.#setConnection(null);
+          this.#phase = Phase.ERROR;
+          this.#message = this.#t(message.reason === "unpin" ? "connections.unpinned" : "connections.pinLost");
+          this.#render();
+        }
+        void this.refreshConnection();
+        return;
+      }
+      if (message?.type === MessageType.ACTIVE_TAB_CHANGED) return; // focus never changes a pin
+      if (message?.type !== MessageType.AI_MOVE && message?.type !== MessageType.CONTENT_STATUS) return;
+      if (
+        !this.#pin ||
+        sender?.tab?.id !== this.#pin.tabId ||
+        message.requestId !== this.#expectedReplyId ||
+        this.#expectedReplyId === null ||
+        (this.#phase !== Phase.AWAITING && this.#phase !== Phase.SENDING)
+      )
+        return;
+      if (message.diagnostics) {
+        this.#diagnostics = message.diagnostics;
+        this.#renderDiagnostics();
+      }
+      if (message.type === MessageType.AI_MOVE) {
         void this.handleAiMove(message);
         return;
       }
-      if (message?.type === MessageType.CONTENT_STATUS) {
-        if (message.diagnostics) {
-          this.#diagnostics = message.diagnostics;
-          this.#renderDiagnostics();
-        }
-        if (message.state === "no-move") {
-          void this.handleAiMove({ noMove: true, text: message.text });
-          return;
-        }
-        if (typeof message.error === "string" && message.error) {
-          this.#message = message.error;
-          this.#phase = Phase.ERROR;
-          this.#render();
-          return;
-        }
-      }
-      if (message?.type === MessageType.ACTIVE_TAB_CHANGED) {
-        this.#setConnection(message);
+      if (message.state === "generation-wait") {
+        this.#message = this.#t("status.waitGeneration", { platform: this.#connection.label });
+        this.#render();
+      } else if (message.state === "no-move") {
+        void this.handleAiMove({ noMove: true, repeated: message.repeated, text: message.text });
+      } else if (message.error) {
+        this.#phase = Phase.ERROR;
+        this.#message = this.#t("status.sendFailure", { detail: message.error });
+        this.#showCopyPrompt(this.#lastPrompt);
         this.#render();
       }
     });
@@ -1469,6 +2073,11 @@ export class App {
   }
 
   #applyFenFromDialog() {
+    if (this.#match) return;
+    this.#cancelReply();
+    this.#matchFinished = false;
+    this.#localEngineMode = false;
+    this.#lastIllegalReply = null;
     const { fenDialog } = this.#refs;
     if (!fenDialog?.input) return;
     const fen = fenDialog.input.value.trim();
@@ -1481,7 +2090,7 @@ export class App {
     }
     this.#phase = Phase.IDLE;
     this.#clearSelection();
-    this.#message = "Position set from FEN.";
+    this.#message = this.#t("status.positionSet");
     this.#persist();
     this.#render();
     this.#updateBadge();
@@ -1521,9 +2130,11 @@ export class App {
   async #copyText(text, confirmation) {
     try {
       await navigator.clipboard.writeText(text);
-      this.#message = confirmation;
-      this.#phase = Phase.IDLE;
-      this.#hideCopyPrompt();
+      const manualAwaiting =
+        this.#settings.sendMode === "manual" && this.#expectedReplyId !== null && text === this.#lastPrompt;
+      this.#message = manualAwaiting ? this.#t("status.manualCopied") : confirmation;
+      this.#phase = manualAwaiting ? Phase.AWAITING : Phase.IDLE;
+      if (!manualAwaiting) this.#hideCopyPrompt();
       this.#hideReloadTab();
     } catch (error) {
       log.warn("clipboard unavailable", error);
@@ -1549,10 +2160,10 @@ export class App {
     reportEl.hidden = !hidden;
     if (!hidden) {
       reportEl.textContent = "";
-      toggleBtn.textContent = "Show details";
+      toggleBtn.textContent = this.#t("diagnostics.showDetails");
     } else {
       reportEl.textContent = this.#diagnostics ? formatReport(this.#diagnostics) : "No diagnostics yet.";
-      toggleBtn.textContent = "Hide details";
+      toggleBtn.textContent = this.#t("diagnostics.hideDetails");
     }
   }
 
@@ -1639,12 +2250,33 @@ export class App {
 
   /** @returns {ReturnType<typeof describeStatus>} */
   #status() {
+    if (this.#settings.paused) return { text: this.#t("status.paused"), kind: "info", action: StatusAction.NONE };
+    if (this.#lastIllegalReply && this.#phase === Phase.ERROR) {
+      return { text: this.#message, kind: "error", action: StatusAction.RETRY };
+    }
+    if (this.#matchFinished) return { text: this.#message, kind: "info", action: StatusAction.NEW_GAME };
+    if (this.#phase === Phase.AWAITING && this.#expectedReplyId !== null) {
+      if (this.#settings.sendMode === "manual") {
+        return {
+          text: this.#message || this.#t("status.manualSend"),
+          kind: "waiting",
+          action: StatusAction.COPY_PROMPT,
+        };
+      }
+      // A still-pending response is not permission to submit the same prompt
+      // again. Ask again becomes available after a reported failure/rejection.
+      return {
+        text: this.#message || this.#t("status.waitingAi", { platform: this.#connection.label }),
+        kind: "waiting",
+        action: StatusAction.NONE,
+      };
+    }
     return describeStatus({
       session: this.#session,
       connection: this.#connection,
       phase: this.#phase,
       message: this.#message,
-      busy: this.#phase === Phase.SENDING || this.#busy,
+      busy: this.#phase === Phase.SENDING || (this.#busy && !this.#match),
       t: this.#t,
       diagnosticsError: this.#diagnostics?.lastError || "",
     });
@@ -1653,8 +2285,9 @@ export class App {
   /** Schedules a debounced snapshot write. */
   #persist() {
     window.clearTimeout(this.#persistTimer);
+    const rated = Boolean(this.#match || this.#matchSaving);
     this.#persistTimer = window.setTimeout(async () => {
-      if (!this.#settings.persistGame) {
+      if (!this.#settings.persistGame || !globalThis.chrome?.storage?.local) {
         return;
       }
       try {
@@ -1665,7 +2298,7 @@ export class App {
           this.#render();
         }
         // Also save to library if game has moves
-        if (this.#library && this.#session.plyCount > 0) {
+        if (this.#library && this.#session.plyCount > 0 && !rated) {
           const game = gameFromSnapshot(this.#session.snapshot(), { title: `Game ${new Date().toLocaleDateString()}` });
           this.#library = addGame(this.#library, game);
           await writeLibrary(this.#library);
@@ -1691,11 +2324,14 @@ export class App {
         flipped: this.#effectiveFlipped(),
         showCoordinates: this.#settings.showCoordinates,
         showLegalTargets: this.#settings.showLegalTargets,
+        showLastMove: this.#settings.highlightLastMove,
       }),
       {
         selected: this.#selected,
-        interactive: !this.#busy && session.isPlayerTurn && !session.isGameOver,
+        interactive:
+          !this.#busy && !this.#settings.paused && !this.#matchFinished && session.isPlayerTurn && !session.isGameOver,
         hint: this.#hintMove,
+        animationsEnabled: this.#settings.animationsEnabled,
       },
     );
 
@@ -1712,39 +2348,55 @@ export class App {
     }
     if (statusAction) {
       statusAction.hidden = status.action === StatusAction.NONE;
-      statusAction.textContent = ACTION_LABELS[status.action] || status.action || "";
+      statusAction.textContent = ACTION_KEYS[status.action] ? this.#t(ACTION_KEYS[status.action]) : "";
       statusAction.dataset.action = status.action;
+      statusAction.disabled = this.#retryPending || Boolean(this.#match) || this.#settings.paused;
     }
 
     if (turn) {
       turn.textContent = session.isGameOver
-        ? this.#t
-          ? this.#t("status.gameOver")
-          : "Game over"
-        : session.turn === "w"
-          ? "White to move"
-          : "Black to move";
+        ? this.#t("status.gameOver")
+        : this.#t("status.turn", { color: this.#t(session.turn === "w" ? "clock.white" : "clock.black") });
     }
     if (opponent) {
       opponent.textContent = this.#connection.supported
-        ? `${this.#connection.label} (${session.aiColor === "w" ? "White" : "Black"})`
-        : this.#t
-          ? this.#t("status.noAi")
-          : "No AI chat open";
+        ? `${this.#connection.label}${this.#connection.title ? ` — ${this.#connection.title}` : ` #${this.#connection.tabId}`} (${this.#t(session.aiColor === "w" ? "clock.white" : "clock.black")})`
+        : this.#t("connections.choosePin");
     }
     if (fen) {
       fen.textContent = session.fen;
     }
 
-    if (controls.undo) controls.undo.disabled = session.plyCount === 0 || this.#busy;
+    if (controls.undo) controls.undo.disabled = session.plyCount === 0 || this.#busy || this.#settings.paused;
     if (controls.newGame) controls.newGame.disabled = this.#busy;
     if (controls.flip) controls.flip.disabled = this.#busy;
+    if (controls.switchSide) {
+      controls.switchSide.textContent = this.#t(
+        session.playerColor === "w" ? "controls.playBlack" : "controls.playWhite",
+      );
+      controls.switchSide.disabled = this.#busy;
+    }
+    if (controls.pause) {
+      controls.pause.textContent = this.#t(this.#settings.paused ? "controls.resume" : "controls.pause");
+      controls.pause.setAttribute("aria-pressed", String(this.#settings.paused));
+    }
     if (controls.askAi) {
-      controls.askAi.hidden = !(session.isWaitingForAi && !session.isGameOver);
-      controls.askAi.disabled = this.#phase === Phase.SENDING || this.#busy;
+      controls.askAi.hidden = !(
+        session.isWaitingForAi &&
+        !session.isGameOver &&
+        !this.#match &&
+        !this.#matchFinished &&
+        !this.#localEngineMode &&
+        this.#expectedReplyId === null
+      );
+      controls.askAi.disabled =
+        this.#phase === Phase.SENDING || this.#busy || this.#retryPending || this.#settings.paused;
+      controls.askAi.textContent = this.#t(
+        this.#lastIllegalReply && this.#phase === Phase.ERROR ? "status.askAgain" : "status.askAi",
+      );
     }
     if (controls.hint) {
-      controls.hint.disabled = this.#busy || session.isGameOver;
+      controls.hint.disabled = this.#busy || this.#settings.paused || session.isGameOver;
     }
 
     // Replay controls
@@ -1756,6 +2408,7 @@ export class App {
     this.#renderEval();
     this.#renderClock();
     this.#renderDiagnostics();
+    this.#renderMatch();
 
     // FEN status
     if (this.#refs.fenStatus) {
@@ -1788,7 +2441,7 @@ export class App {
     }
 
     const formatted = formatEval(score);
-    evalText.textContent = `Eval: ${formatted.text} (heuristic)`;
+    evalText.textContent = this.#t("analysis.evalHeuristic", { score: formatted.text });
 
     // Convert score to 0-100% for white
     const clamped = Math.max(-1000, Math.min(1000, score));
@@ -1798,12 +2451,12 @@ export class App {
 
   /** @returns {number} first move number, taken from the starting FEN. */
   #historyStartNumber() {
-    return Number.parseInt(this.#session.initialFen.split(/\\s+/)[5] || "1", 10) || 1;
+    return Number.parseInt(this.#session.initialFen.split(/\s+/)[5] || "1", 10) || 1;
   }
 
   /** @returns {'w'|'b'} colour of the first ply in the history. */
   #historyFirstMover() {
-    return this.#session.initialFen.split(/\\s+/)[1] === "b" ? "b" : "w";
+    return this.#session.initialFen.split(/\s+/)[1] === "b" ? "b" : "w";
   }
 
   #applySettingsToDialog() {
@@ -1816,6 +2469,16 @@ export class App {
     if (settingsDialog.controls.fontScale) settingsDialog.controls.fontScale.value = this.#settings.fontScale;
     if (settingsDialog.controls.density) settingsDialog.controls.density.value = this.#settings.density;
     if (settingsDialog.controls.engineLevel) settingsDialog.controls.engineLevel.value = String(this.#engineLevel);
+    if (this.#refs.analysis?.level) this.#refs.analysis.level.value = String(this.#engineLevel);
+    if (settingsDialog.controls.sendMode) settingsDialog.controls.sendMode.value = this.#settings.sendMode;
+    if (settingsDialog.controls.maxRetries)
+      settingsDialog.controls.maxRetries.value = String(this.#settings.maxRetries);
+    if (settingsDialog.controls.generationWait)
+      settingsDialog.controls.generationWait.value = String(this.#settings.generationWaitMs / 1000);
+    if (settingsDialog.controls.soundVolume)
+      settingsDialog.controls.soundVolume.value = String(this.#settings.soundVolume);
+    if (settingsDialog.controls.clockDuration)
+      settingsDialog.controls.clockDuration.value = String(this.#settings.clockDurationMs / 60000);
 
     document.body.dataset.theme = resolveTheme(this.#settings.theme);
     document.body.dataset.boardTheme = this.#settings.boardTheme;
@@ -1869,7 +2532,7 @@ export class App {
 
       const meta = document.createElement("div");
       meta.className = "library-item-meta";
-      meta.textContent = `${game.date} • ${game.result} • ${game.moves.length} moves • ${game.playerColor === "w" ? "White" : "Black"}`;
+      meta.textContent = `${game.date} • ${game.result} • ${this.#t("library.moves", { count: game.moves.length })} • ${this.#t(game.playerColor === "w" ? "clock.white" : "clock.black")}`;
       item.append(meta);
 
       const actions = document.createElement("div");
@@ -1877,35 +2540,35 @@ export class App {
 
       const openBtn = document.createElement("button");
       openBtn.className = "button";
-      openBtn.textContent = "Open";
+      openBtn.textContent = this.#t("library.open");
       openBtn.dataset.action = "open";
       openBtn.dataset.id = game.id;
       actions.append(openBtn);
 
       const renameBtn = document.createElement("button");
       renameBtn.className = "button";
-      renameBtn.textContent = "Rename";
+      renameBtn.textContent = this.#t("library.rename");
       renameBtn.dataset.action = "rename";
       renameBtn.dataset.id = game.id;
       actions.append(renameBtn);
 
       const dupBtn = document.createElement("button");
       dupBtn.className = "button";
-      dupBtn.textContent = "Dup";
+      dupBtn.textContent = this.#t("library.duplicate");
       dupBtn.dataset.action = "duplicate";
       dupBtn.dataset.id = game.id;
       actions.append(dupBtn);
 
       const delBtn = document.createElement("button");
       delBtn.className = "button";
-      delBtn.textContent = "Delete";
+      delBtn.textContent = this.#t("library.delete");
       delBtn.dataset.action = "delete";
       delBtn.dataset.id = game.id;
       actions.append(delBtn);
 
       const expBtn = document.createElement("button");
       expBtn.className = "button";
-      expBtn.textContent = "Export";
+      expBtn.textContent = this.#t("library.export");
       expBtn.dataset.action = "export";
       expBtn.dataset.id = game.id;
       actions.append(expBtn);
@@ -1918,7 +2581,11 @@ export class App {
   }
 
   async openLibraryGame(id) {
-    if (!this.#library) return;
+    if (!this.#library || this.#match) return;
+    this.#cancelReply();
+    this.#matchFinished = false;
+    this.#localEngineMode = false;
+    this.#lastIllegalReply = null;
     const game = this.#library.games.find((g) => g.id === id);
     if (!game) return;
 
@@ -1980,7 +2647,7 @@ export class App {
     this.#lastDeletedGame = null;
     await removeValue(LAST_DELETED_KEY);
     this.#renderLibrary();
-    this.#message = "Game restored.";
+    this.#message = this.#t("status.gameRestored");
     this.#render();
   }
 
@@ -2103,6 +2770,8 @@ export class App {
   // --- Replay ---
 
   jumpToPly(ply) {
+    if (this.#match || this.#busy) return;
+    this.#cancelReply();
     let target = ply;
     if (target < 0) target = 0;
     if (target > this.#session.history.length) target = this.#session.history.length;
@@ -2113,10 +2782,285 @@ export class App {
     }
   }
 
+  /** Side switching is a new game, never a color swap in an existing game. */
+  async switchSide(color) {
+    if (color === this.#settings.playerColor) return true;
+    if (this.#busy || this.#match) {
+      this.#applySettingsToDialog();
+      return false;
+    }
+    if (
+      this.#session.plyCount > 0 &&
+      typeof globalThis.confirm === "function" &&
+      !globalThis.confirm(this.#t("controls.confirmSide"))
+    ) {
+      this.#applySettingsToDialog();
+      return false;
+    }
+    await this.updateSettings({ playerColor: color });
+    return true;
+  }
+
+  /**
+   * Start a REAL game: Stockfish owns the session's opponent/human slot, and
+   * the chat AI owns only its AI slot. The chat reply still passes the pinned
+   * content watcher, strict send contract and GameSession legality checks.
+   */
+  async startRatedMatch() {
+    if (this.#match || this.#matchSaving || this.#busy) return false;
+    if (this.#settings.paused) {
+      this.#message = this.#t("status.paused");
+      this.#render();
+      return false;
+    }
+    if (this.#settings.sendMode !== "auto") {
+      this.#message = this.#t("match.requiresAuto");
+      this.#phase = Phase.ERROR;
+      this.#render();
+      return false;
+    }
+    const target = await chrome.runtime.sendMessage(createMessage(MessageType.GET_ACTIVE_TAB)).catch(() => null);
+    if (this.#match || this.#matchSaving || this.#busy || this.#settings.paused) return false;
+    if (
+      !target?.supported ||
+      !this.#pin ||
+      target.tabId !== this.#pin.tabId ||
+      target.platform !== this.#connection.platform ||
+      target.tabId !== this.#connection.tabId
+    ) {
+      this.#message = this.#t("match.requiresPin");
+      this.#phase = Phase.ERROR;
+      this.#render();
+      return false;
+    }
+    if (!this.#stockfish?.ready || !this.#engineRange) {
+      this.#message = this.#t("match.engineError", { detail: this.#engineError || this.#t("match.unavailable") });
+      this.#phase = Phase.ERROR;
+      this.#render();
+      return false;
+    }
+    if (typeof globalThis.confirm === "function" && !globalThis.confirm(this.#t("match.confirmReplace"))) return false;
+    this.#cancelReply();
+    const aiColor = this.#matchBook.games.length % 2 === 0 ? "w" : "b";
+    const engineColor = aiColor === "w" ? "b" : "w";
+    const anchor = clampUciElo(this.#settings.matchAnchorElo, this.#engineRange);
+    this.#session.reset({ playerColor: engineColor });
+    this.#matchFinished = false;
+    this.#localEngineMode = false;
+    this.#flipOverride = null;
+    this.#clearSelection();
+    this.#hintMove = null;
+    const match = {
+      tabId: target.tabId,
+      platformId: target.platform,
+      aiColor,
+      engineColor,
+      anchor,
+      moveTime: clampMoveTime(this.#settings.matchMoveTimeMs),
+      stockfishMoves: 0,
+      chatMoves: 0,
+    };
+    this.#match = match;
+    this.#busy = true; // held until rated completion or an unrated abort
+    this.#phase = Phase.IDLE;
+    this.#message = this.#t("match.started", {
+      color: this.#t(aiColor === "w" ? "clock.white" : "clock.black"),
+      anchor,
+    });
+    this.#persist();
+    this.#render();
+    try {
+      await this.#stockfish.newGame(anchor);
+      if (this.#match !== match) return false;
+      await this.#advanceMatch(match);
+      return this.#match === match;
+    } catch (error) {
+      if (this.#match === match)
+        this.#abortMatch(this.#t("match.engineError", { detail: error?.message || String(error) }));
+      return false;
+    }
+  }
+
+  async #advanceMatch(match = this.#match) {
+    if (!match || this.#match !== match || this.#settings.paused) return;
+    const session = this.#session;
+    if (session.outcome.over) {
+      await this.#finishMatch(session.outcome.result, session.outcome.reason);
+      return;
+    }
+    if (session.turn === match.aiColor) {
+      const prompt =
+        session.plyCount === 0
+          ? buildOpeningPrompt({ aiColor: session.aiColor, fen: session.fen })
+          : this.#movePrompt();
+      const sent = await this.#sendPrompt(prompt, { expected: "rated-ai-move", match: true });
+      if (!sent && this.#match === match) this.#abortMatch(this.#t("match.unratedProtocol"));
+      return;
+    }
+
+    this.#phase = Phase.IDLE;
+    this.#message = this.#t("match.engineThinking", { anchor: match.anchor });
+    this.#render();
+    try {
+      let legalUci = "";
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const answer = await this.#stockfish.search(session.fen, match.anchor, match.moveTime);
+        if (this.#match !== match || this.#settings.paused) return;
+        const legal = session.position.moveFromUci(answer);
+        if (legal && toUci(legal) === answer) {
+          legalUci = answer;
+          break;
+        }
+        log.warn(`Stockfish proposed illegal move ${answer}; research attempt ${attempt + 1}`);
+      }
+      if (!legalUci) throw new Error("Stockfish returned two illegal moves; game not rated.");
+      const result = session.playHumanMove(legalUci); // engineColor slot ONLY
+      if (!result.ok) throw new Error("Stockfish move rejected by the chess rules engine.");
+      match.stockfishMoves += 1;
+      this.#persist();
+      this.#updateBadge();
+      this.#playSoundForMove(result.entry);
+      this.#updateClockAfterMove();
+      this.#render();
+      if (session.outcome.over) await this.#finishMatch(session.outcome.result, session.outcome.reason);
+      else await this.#advanceMatch();
+    } catch (error) {
+      if (this.#match === match)
+        this.#abortMatch(this.#t("match.engineError", { detail: error?.message || String(error) }));
+    }
+  }
+
+  async #finishMatch(result, reason) {
+    const match = this.#match;
+    if (!match || this.#matchSaving) return;
+    const outcome = this.#session.outcome;
+    const terminal = ["checkmate", "stalemate", "fifty-move", "threefold-repetition", "insufficient-material"];
+    if (
+      !((terminal.includes(reason) && outcome.over && result === outcome.result) || reason === "resignation") ||
+      match.stockfishMoves === 0 ||
+      match.chatMoves === 0
+    ) {
+      this.#abortMatch(this.#t("match.unratedProtocol"));
+      return;
+    }
+    const pgn = formatPgn({
+      initialFen: this.#session.initialFen,
+      san: this.#session.history.map((entry) => entry.san),
+      result,
+      headers: {
+        Event: "Stockfish UCI_Elo match",
+        Site: "AI Chess Companion (local)",
+        White: match.aiColor === "w" ? `Chat AI (${match.platformId})` : `Stockfish UCI_Elo ${match.anchor}`,
+        Black: match.aiColor === "b" ? `Chat AI (${match.platformId})` : `Stockfish UCI_Elo ${match.anchor}`,
+        Termination: reason,
+      },
+    });
+    const record = {
+      id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      createdAt: Date.now(),
+      anchorElo: match.anchor,
+      aiColor: match.aiColor,
+      result,
+      platformId: match.platformId,
+      pgn,
+      stockfishMoves: match.stockfishMoves,
+      chatMoves: match.chatMoves,
+    };
+    // The chess result is already final. Hide Stop and serialize persistence
+    // before another match can start; a late Stop/pause/reset must not turn a
+    // completed game into a protocol loss or overwrite a newer board status.
+    const finishedSession = this.#session;
+    const finishedEpoch = this.#retryEpoch; // GameSession.reset mutates in place
+    this.#match = null;
+    this.#matchSaving = true;
+    this.#busy = false;
+    this.#expectedReplyId = null;
+    this.#matchFinished = reason === "resignation";
+    this.#phase = Phase.IDLE;
+    this.#message = this.#t("match.saving");
+    this.#render();
+    let saved = null;
+    try {
+      saved = await appendRatedMatch(this.#matchBook, record);
+    } catch (error) {
+      log.warn("could not store rated match", error);
+    }
+    this.#matchSaving = false;
+    if (saved) this.#matchBook = saved;
+    if (this.#session === finishedSession && this.#retryEpoch === finishedEpoch) {
+      this.#phase = saved ? Phase.IDLE : Phase.ERROR;
+      this.#message = saved ? this.#t("match.finished", { result }) : this.#t("match.storageError");
+      this.#render();
+    } else {
+      this.#renderMatch(); // reset/new board: don't replace its status with an old result
+    }
+  }
+
+  #abortMatch(reason) {
+    if (!this.#match) return;
+    this.#match = null;
+    this.#cancelReply();
+    this.#stopStockfish();
+    this.#busy = false;
+    this.#phase = Phase.ERROR;
+    this.#message = reason;
+    this.#render();
+    if (!this.#settings.paused) void this.#bootStockfish();
+  }
+
+  stopRatedMatch() {
+    this.#abortMatch(this.#t("match.unratedStopped"));
+  }
+
+  async exportRatedMatches() {
+    if (!this.#matchBook.games.length) return;
+    const pgn = exportMatches(this.#matchBook);
+    this.#downloadText(pgn, "stockfish-uci-elo-matches.pgn");
+    await this.#copyText(pgn, this.#t("match.exported"));
+  }
+
+  async #playLocalEngineTurn() {
+    if (
+      !this.#localEngineMode ||
+      this.#match ||
+      this.#settings.paused ||
+      this.#session.isGameOver ||
+      this.#session.isPlayerTurn
+    )
+      return;
+    this.#busy = true;
+    this.#message = this.#t("analysis.evaluating");
+    this.#render();
+    const session = this.#session;
+    try {
+      const { findBestMove } = await import("../core/search.js");
+      const answer = findBestMove(session.position, {
+        level: this.#engineLevel,
+        maxDepth: this.#engineLevel,
+        timeLimitMs: 1200,
+      });
+      if (!this.#localEngineMode || this.#settings.paused || session !== this.#session || !answer.move) return;
+      const uci = toUci(answer.move);
+      if (!session.position.moveFromUci(uci)) return;
+      const result = session.playAiMove(uci); // local mode ONLY; never the chat AI's turn
+      if (result.ok) {
+        this.#persist();
+        this.#updateBadge();
+        this.#playSoundForMove(result.entry);
+      }
+    } catch (error) {
+      log.warn("local engine failed", error);
+      this.#message = this.#t("analysis.engineFailed");
+    } finally {
+      this.#busy = false;
+      this.#render();
+    }
+  }
+
   // --- Analysis ---
 
   async requestHint() {
-    if (this.#busy) return;
+    if (this.#busy || this.#settings.paused) return;
     if (this.#session.isGameOver) return;
 
     this.#hintMove = null;
@@ -2200,33 +3144,26 @@ export class App {
   }
 
   async playVsEngine() {
-    if (this.#busy) return;
-    // If it's player turn, let engine play as AI
-    if (this.#session.isPlayerTurn) {
-      this.#message = "Engine will play as opponent after your move.";
-      this.#render();
+    if (this.#busy || this.#match || this.#settings.paused) return;
+    if (
+      this.#session.plyCount > 0 &&
+      typeof globalThis.confirm === "function" &&
+      !globalThis.confirm(this.#t("analysis.confirmEngine"))
+    )
       return;
-    }
-    // Engine's turn now
-    await this.requestHint();
-    // After hint, auto-play best move after short delay
-    setTimeout(() => {
-      if (this.#hintMove) {
-        const uci = `${toName(this.#hintMove.from)}${toName(this.#hintMove.to)}`;
-        const result = this.#session.playAiMove(uci);
-        if (result.ok) {
-          this.#persist();
-          this.#render();
-          this.#updateBadge();
-          this.#playSoundForMove(result.entry);
-          this.#announceMove(result.entry);
-        }
-        this.#hintMove = null;
-      }
-    }, 600);
+    this.#cancelReply();
+    this.#session.reset({ playerColor: this.#settings.playerColor });
+    this.#localEngineMode = true;
+    this.#matchFinished = false;
+    this.#phase = Phase.IDLE;
+    this.#message = this.#t("analysis.engineMode");
+    this.#persist();
+    this.#render();
+    if (!this.#session.isPlayerTurn) await this.#playLocalEngineTurn();
   }
 
   stopEngine() {
+    if (this.#match) return;
     if (this.#engineWorker) {
       this.#engineWorker.postMessage({ type: "stop" });
     }
@@ -2237,15 +3174,15 @@ export class App {
   }
 }
 
-/** Labels for the status action button. */
-const ACTION_LABELS = Object.freeze({
-  [StatusAction.ASK_AI]: "Ask the AI to move",
-  [StatusAction.RETRY]: "Ask again",
-  [StatusAction.OPEN_AI]: "Open an AI chat",
-  [StatusAction.NEW_GAME]: "New game",
-  [StatusAction.RELOAD_TAB]: "Reload the tab",
-  [StatusAction.COPY_PROMPT]: "Copy prompt",
-  [StatusAction.UNDO_DELETE]: "Undo",
+/** Translation keys for the status action button. */
+const ACTION_KEYS = Object.freeze({
+  [StatusAction.ASK_AI]: "status.askAi",
+  [StatusAction.RETRY]: "status.askAgain",
+  [StatusAction.OPEN_AI]: "status.openAi",
+  [StatusAction.NEW_GAME]: "status.newGame",
+  [StatusAction.RELOAD_TAB]: "status.reloadTab",
+  [StatusAction.COPY_PROMPT]: "status.copyPrompt",
+  [StatusAction.UNDO_DELETE]: "library.undo",
 });
 
 /**

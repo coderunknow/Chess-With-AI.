@@ -27,7 +27,7 @@ const sharedRules = {
 
 export default [
   {
-    ignores: ["node_modules/**", "build/**", "coverage/**", "icons/**"],
+    ignores: ["node_modules/**", "build/**", "coverage/**", "icons/**", "engine/stockfish/**"],
   },
   js.configs.recommended,
   {

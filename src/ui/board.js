@@ -51,6 +51,7 @@ import { parseUci } from "../core/move.js";
  * @param {boolean} [input.flipped] true when Black is at the bottom.
  * @param {boolean} [input.showCoordinates]
  * @param {boolean} [input.showLegalTargets]
+ * @param {boolean} [input.showLastMove]
  * @param {number} [input.hoverSquare] square currently hovered
  * @returns {BoardDescription}
  */
@@ -62,6 +63,7 @@ export function describeBoard({
   flipped = false,
   showCoordinates = true,
   showLegalTargets = true,
+  showLastMove = true,
   hoverSquare = -1,
 }) {
   const targetSet = new Set(targets);
@@ -77,7 +79,8 @@ export function describeBoard({
       const piece = position.pieceAt(square);
       const name = toName(square);
       const isTarget = targetSet.has(name);
-      const isLastMoveSquare = lastMove !== null && (square === lastMove.from || square === lastMove.to);
+      const isLastMoveSquare =
+        showLastMove && lastMove !== null && (square === lastMove.from || square === lastMove.to);
 
       /** @type {BoardCell} */
       const cell = {
@@ -145,6 +148,9 @@ export class BoardView {
   #suppressClick = false;
   #lastMove = null;
   #animationEnabled = true;
+  #reducedMotion = false;
+  #previousPieces = null;
+  #flightCleanup = [];
   #ghost = null;
 
   /**
@@ -199,11 +205,9 @@ export class BoardView {
     // Respect reduced motion
     try {
       const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-      if (media.matches) {
-        this.#animationEnabled = false;
-      }
+      this.#reducedMotion = media.matches;
       media.addEventListener?.("change", (e) => {
-        this.#animationEnabled = !e.matches;
+        this.#reducedMotion = e.matches;
       });
     } catch {
       // ignore
@@ -218,22 +222,25 @@ export class BoardView {
    * @param {number} [options.selected]
    * @param {boolean} [options.interactive] whether cells accept input.
    * @param {{from:number,to:number}|null} [options.hint] hint arrow
+   * @param {boolean} [options.animationsEnabled]
    */
-  render(description, { selected = -1, interactive = true, hint = null } = {}) {
-    if (!this.#built || this.#orderChanged(description)) {
+  render(description, { selected = -1, interactive = true, hint = null, animationsEnabled = true } = {}) {
+    const orderChanged = !this.#built || this.#orderChanged(description);
+    if (orderChanged) {
+      this.#flightCleanup.forEach((cleanup) => cleanup());
+      this.#flightCleanup = [];
       this.#build(description);
     }
     this.#root.classList.toggle("is-static", !interactive);
-
-    // Handle animated moves
-    if (this.#animationEnabled && this.#lastMove && description.lastMove) {
-      const prev = this.#lastMove;
-      const curr = description.lastMove;
-      if (prev.from !== curr.from || prev.to !== curr.to) {
-        this.#animateMove(prev, curr, description);
-      }
-    }
-    this.#lastMove = description.lastMove;
+    const prior = this.#previousPieces;
+    const move = description.lastMove;
+    const moved =
+      !orderChanged &&
+      prior &&
+      move &&
+      prior.get(move.from) &&
+      (!this.#lastMove || this.#lastMove.from !== move.from || this.#lastMove.to !== move.to);
+    this.#lastMove = move;
 
     for (const cell of description.cells) {
       const button = this.#cells.get(cell.square);
@@ -248,6 +255,10 @@ export class BoardView {
       this.#paintCoordinates(button, cell);
     }
 
+    this.#previousPieces = new Map(description.cells.map((cell) => [cell.square, cell.piece]));
+    if (moved && animationsEnabled && this.#animationEnabled && !this.#reducedMotion) {
+      this.#animateMove(move, prior, description);
+    }
     // Hint arrow
     this.#renderHint(hint, description);
   }
@@ -367,6 +378,17 @@ export class BoardView {
     return Number.isInteger(square) ? square : null;
   }
 
+  #squareAtPointer(event) {
+    // Pointer capture sends move/up to the original button. Ask the document
+    // what is actually underneath the coordinates (including off-board).
+    const hitTest = this.#root.ownerDocument?.elementFromPoint;
+    const target =
+      typeof hitTest === "function" && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+        ? hitTest.call(this.#root.ownerDocument, event.clientX, event.clientY)
+        : event.target;
+    return this.#squareFromEvent({ target });
+  }
+
   #onPointerDown(event) {
     // A previous gesture whose `click` never arrived (e.g. released
     // off-window) must not swallow the next genuine click.
@@ -425,7 +447,7 @@ export class BoardView {
       this.#ghost.style.transform = `translate(${dx}px, ${dy}px)`;
     }
 
-    const square = this.#squareFromEvent(event);
+    const square = this.#squareAtPointer(event);
     if (square !== null && square !== this.#hoverSquare) {
       this.#hoverSquare = square;
       for (const [sq, btn] of this.#cells) {
@@ -438,16 +460,18 @@ export class BoardView {
     if (!this.#dragState) return;
 
     const from = this.#dragState.from;
-    const to = this.#squareFromEvent(event);
+    const to = this.#squareAtPointer(event);
     const moved = this.#dragState.moved;
 
     this.#endDrag();
 
+    // Even an off-board release may generate a click retargeted to the source.
+    // Consume it instead of unexpectedly reselecting the dragged piece.
+    this.#suppressClick = true;
     if (to === null) return;
     // Claim the compatibility `click` that follows every pointerup, so a tap
     // selects exactly once (instead of select-then-deselect) and a drag
     // doesn't reselect its origin square afterwards.
-    this.#suppressClick = true;
     if (!moved) {
       // Treat as click
       this.#onSelect(to);
@@ -526,25 +550,104 @@ export class BoardView {
     this.#hoverSquare = -1;
   }
 
-  #animateMove(prev, _curr, _description) {
-    if (!this.#animationEnabled) return;
-    const fromBtn = this.#cells.get(prev.from);
-    const toBtn = this.#cells.get(prev.to);
-    if (!fromBtn || !toBtn) return;
+  #animateMove(move, prior, description) {
+    this.#flightCleanup.forEach((cleanup) => cleanup());
+    this.#flightCleanup = [];
+    const mover = prior.get(move.from);
+    if (!mover) return;
+    // The board grid is already painted; overlay only the moving pieces. The
+    // destination is hidden during the flight, then revealed. Focus and input
+    // stay on the 64 stable button nodes, never on an animation overlay.
+    this.#fly(move.from, move.to, mover);
+    const captured = prior.get(move.to);
+    if (captured) this.#fadeCapture(move.to, captured);
+    // An en-passant capture removes the pawn beside the destination.
+    if (mover.toLowerCase() === "p" && !captured && fileOf(move.from) !== fileOf(move.to)) {
+      const square = toIndex(fileOf(move.to), rankOf(move.from));
+      if (prior.get(square) && !description.cells.find((cell) => cell.square === square)?.piece) {
+        this.#fadeCapture(square, prior.get(square));
+      }
+    }
+    if (mover.toLowerCase() === "k" && Math.abs(fileOf(move.to) - fileOf(move.from)) === 2) {
+      const rank = rankOf(move.from);
+      const kingSide = fileOf(move.to) > fileOf(move.from);
+      this.#fly(
+        toIndex(kingSide ? 7 : 0, rank),
+        toIndex(kingSide ? 5 : 3, rank),
+        prior.get(toIndex(kingSide ? 7 : 0, rank)),
+      );
+    }
+  }
 
-    // Simple animation: highlight moving piece
-    const piece = toBtn.querySelector(".piece");
-    if (!piece) return;
+  #flightNode(square, glyph) {
+    const button = this.#cells.get(square);
+    if (!button || !glyph) return null;
+    const boardRect = this.#root.getBoundingClientRect();
+    const rect = button.getBoundingClientRect();
+    const node = document.createElement("span");
+    node.className = `piece-flight ${isWhitePiece(glyph) ? "piece-white" : "piece-black"}`;
+    node.textContent = PIECE_GLYPHS[glyph] || "";
+    node.style.left = `${rect.left - boardRect.left}px`;
+    node.style.top = `${rect.top - boardRect.top}px`;
+    node.style.width = `${rect.width}px`;
+    node.style.height = `${rect.height}px`;
+    node.setAttribute("aria-hidden", "true");
+    this.#root.append(node);
+    return node;
+  }
 
-    piece.style.transition = "transform 180ms ease";
-    // We could animate from previous position, but for simplicity just scale
-    piece.style.transform = "scale(1.2)";
-    setTimeout(() => {
-      piece.style.transform = "";
-      setTimeout(() => {
-        piece.style.transition = "";
-      }, 180);
-    }, 180);
+  #fly(from, to, glyph) {
+    const start = this.#cells.get(from);
+    const end = this.#cells.get(to);
+    if (!start || !end || !glyph) return;
+    const node = this.#flightNode(from, glyph);
+    if (!node) return;
+    const realPiece = end.firstElementChild;
+    if (realPiece) realPiece.style.opacity = "0";
+    const startRect = start.getBoundingClientRect();
+    const endRect = end.getBoundingClientRect();
+    const dx = endRect.left - startRect.left;
+    const dy = endRect.top - startRect.top;
+    let finished = false;
+    const cleanup = () => {
+      if (finished) return;
+      finished = true;
+      node.remove();
+      if (realPiece) realPiece.style.opacity = "";
+    };
+    this.#flightCleanup.push(cleanup);
+    if (typeof node.animate === "function") {
+      node
+        .animate([{ transform: "translate(0, 0)" }, { transform: `translate(${dx}px, ${dy}px)` }], {
+          duration: 180,
+          easing: "ease-out",
+        })
+        .finished.then(cleanup, cleanup);
+    } else {
+      node.style.transition = "transform 180ms ease-out";
+      window.setTimeout(() => {
+        node.style.transform = `translate(${dx}px, ${dy}px)`;
+      }, 0);
+      window.setTimeout(cleanup, 190);
+    }
+  }
+
+  #fadeCapture(square, glyph) {
+    const node = this.#flightNode(square, glyph);
+    if (!node) return;
+    const cleanup = () => node.remove();
+    this.#flightCleanup.push(cleanup);
+    if (typeof node.animate === "function") {
+      node
+        .animate([{ opacity: 1 }, { opacity: 0 }], { duration: 130, easing: "ease-out" })
+        .finished.then(cleanup, cleanup);
+    } else {
+      node.style.transition = "opacity 130ms ease-out";
+      window.setTimeout(() => {
+        node.style.opacity = "0";
+      }, 0);
+      window.setTimeout(cleanup, 140);
+    }
   }
 
   #renderHint(hint, description) {

@@ -65,19 +65,29 @@
         <button id="undo" type="button" class="button">Undo</button>
         <button id="new-game" type="button" class="button">New game</button>
         <button id="flip" type="button" class="button" title="Flip the board">Flip</button>
+        <button id="switch-side" type="button" class="button" title="Start a new game as the other side">
+          Play Black
+        </button>
+        <button id="pause" type="button" class="button" aria-pressed="false">Pause</button>
         <button id="ask-ai" type="button" class="button button-primary" hidden>Ask the AI to move</button>
         <button id="hint" type="button" class="button">Hint</button>
         <button id="analyse-game" type="button" class="button">Analyse</button>
       </div>
 
-      <details id="connections" class="panel-section">
+      <details id="connections" class="panel-section" open>
         <summary id="connections-title">AI chat connections</summary>
         <div class="section-body">
           <p class="hint" id="connections-hint">
             Prompts are typed into the AI chat you already have open. Nothing leaves your browser otherwise.
           </p>
+          <p id="pinned-tab" class="pin-status" role="status">Choose a chat to pin.</p>
+          <div id="tab-list" class="tab-list" aria-label="Open AI chat tabs"></div>
           <div class="row">
-            <label class="visually-hidden" for="platform-select">Open an AI chat</label>
+            <button id="refresh-tabs" type="button" class="button">Refresh tabs</button>
+            <button id="unpin-tab" type="button" class="button" hidden>Unpin</button>
+          </div>
+          <div class="row">
+            <label class="visually-hidden" for="platform-select" data-i18n="status.openAi">Open an AI chat</label>
             <select id="platform-select" class="select"></select>
             <button id="open-platform" type="button" class="button">Open tab</button>
           </div>
@@ -141,6 +151,11 @@
           <p class="hint" id="analysis-heuristic-note">
             This judgement is a heuristic estimate, not a perfect calculation.
           </p>
+          <div class="match-summary" aria-live="polite">
+            <h3 id="match-title">Stockfish Elo match</h3>
+            <p id="match-estimate">No rated games yet.</p>
+            <p class="hint" id="match-scale">Stockfish UCI_Elo scale, not FIDE.</p>
+          </div>
         </div>
       </details>
 
@@ -163,34 +178,36 @@
         <div class="section-body">
           <dl class="meta">
             <div class="meta-row">
-              <dt>Platform</dt>
+              <dt data-i18n="diagnostics.platform">Platform</dt>
               <dd id="diag-platform">—</dd>
             </div>
             <div class="meta-row">
-              <dt>Composer</dt>
+              <dt data-i18n="diagnostics.composer">Composer</dt>
               <dd id="diag-composer">—</dd>
             </div>
             <div class="meta-row">
-              <dt>Send button</dt>
+              <dt data-i18n="diagnostics.sendButton">Send button</dt>
               <dd id="diag-send">—</dd>
             </div>
             <div class="meta-row">
-              <dt>Assistant</dt>
+              <dt data-i18n="diagnostics.assistant">Assistant</dt>
               <dd id="diag-assistant">—</dd>
             </div>
             <div class="meta-row">
-              <dt>Timings</dt>
+              <dt data-i18n="diagnostics.timings">Timings</dt>
               <dd id="diag-timings">—</dd>
             </div>
             <div class="meta-row">
-              <dt>Last error</dt>
+              <dt data-i18n="diagnostics.lastError">Last error</dt>
               <dd id="diag-error">—</dd>
             </div>
           </dl>
           <pre id="diagnostics-report" class="diagnostics" hidden></pre>
           <div class="row">
             <button id="copy-diagnostics" type="button" class="button">Copy report</button>
-            <button id="toggle-diagnostics" type="button" class="button">Show details</button>
+            <button id="toggle-diagnostics" type="button" class="button" data-i18n="diagnostics.showDetails">
+              Show details
+            </button>
           </div>
         </div>
       </details>
@@ -204,122 +221,204 @@
         <button type="button" class="promotion-button" data-piece="b"></button>
         <button type="button" class="promotion-button" data-piece="n"></button>
       </div>
-      <button type="button" class="button" data-cancel>Cancel</button>
+      <button type="button" class="button" data-cancel data-i18n="promotion.cancel">Cancel</button>
     </dialog>
 
     <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
       <h2 id="settings-title" class="dialog-title">Settings</h2>
-      <label class="field" for="settings-side">
-        <span id="settings-play-as-label">Play as</span>
-        <select id="settings-side" class="select">
-          <option value="w">White (moves first)</option>
-          <option value="b">Black (the AI opens)</option>
-        </select>
-      </label>
-      <label class="field" for="settings-theme">
-        <span id="settings-theme-label">Theme</span>
-        <select id="settings-theme" class="select">
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="system">System</option>
-        </select>
-      </label>
-      <label class="field" for="settings-locale">
-        <span id="settings-locale-label">Language</span>
-        <select id="settings-locale" class="select">
-          <option value="en">English</option>
-          <option value="vi">Tiếng Việt</option>
-          <option value="system">System</option>
-        </select>
-      </label>
-      <label class="field" for="settings-board-theme">
-        <span id="settings-board-theme-label">Board theme</span>
-        <select id="settings-board-theme" class="select">
-          <option value="classic">Classic</option>
-          <option value="blue">Blue</option>
-          <option value="green">Green</option>
-          <option value="high-contrast">High contrast</option>
-        </select>
-      </label>
-      <label class="field" for="settings-font-scale">
-        <span id="settings-font-scale-label">Font scale</span>
-        <select id="settings-font-scale" class="select">
-          <option value="small">Small</option>
-          <option value="medium">Medium</option>
-          <option value="large">Large</option>
-        </select>
-      </label>
-      <label class="field" for="settings-density">
-        <span id="settings-density-label">Density</span>
-        <select id="settings-density" class="select">
-          <option value="comfortable">Comfortable</option>
-          <option value="compact">Compact</option>
-        </select>
-      </label>
-      <label class="field" for="settings-engine-level">
-        <span>Engine level</span>
-        <select id="settings-engine-level" class="select">
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4" selected>4</option>
-          <option value="5">5</option>
-          <option value="6">6</option>
-          <option value="7">7</option>
-          <option value="8">8</option>
-        </select>
-      </label>
-      <div class="field-group">
+      <fieldset class="settings-group" id="settings-group-board">
+        <legend id="settings-board-group">Board</legend>
+        <label class="field" for="settings-theme"
+          ><span id="settings-theme-label">Theme</span>
+          <select id="settings-theme" class="select">
+            <option value="dark" data-i18n="settings.themeDark">Dark</option>
+            <option value="light" data-i18n="settings.themeLight">Light</option>
+            <option value="system" data-i18n="settings.themeSystem">System</option>
+          </select>
+        </label>
+        <label class="field" for="settings-locale"
+          ><span id="settings-locale-label">Language</span>
+          <select id="settings-locale" class="select">
+            <option value="en" data-i18n="settings.localeEn">English</option>
+            <option value="vi" data-i18n="settings.localeVi">Tiếng Việt</option>
+            <option value="system" data-i18n="settings.localeSystem">System</option>
+          </select>
+        </label>
+        <label class="field" for="settings-board-theme"
+          ><span id="settings-board-theme-label">Board theme</span>
+          <select id="settings-board-theme" class="select">
+            <option value="classic" data-i18n="settings.boardClassic">Classic</option>
+            <option value="blue" data-i18n="settings.boardBlue">Blue</option>
+            <option value="green" data-i18n="settings.boardGreen">Green</option>
+            <option value="high-contrast" data-i18n="settings.boardHighContrast">High contrast</option>
+          </select>
+        </label>
+        <label class="field" for="settings-font-scale"
+          ><span id="settings-font-scale-label">Font scale</span>
+          <select id="settings-font-scale" class="select">
+            <option value="small" data-i18n="settings.fontSmall">Small</option>
+            <option value="medium" data-i18n="settings.fontMedium">Medium</option>
+            <option value="large" data-i18n="settings.fontLarge">Large</option>
+          </select>
+        </label>
+        <label class="field" for="settings-density"
+          ><span id="settings-density-label">Density</span>
+          <select id="settings-density" class="select">
+            <option value="comfortable" data-i18n="settings.densityComfortable">Comfortable</option>
+            <option value="compact" data-i18n="settings.densityCompact">Compact</option>
+          </select>
+        </label>
         <label class="checkbox"
-          ><input type="checkbox" data-setting="showCoordinates" /><span>Show coordinates</span></label
-        >
-        <label class="checkbox"
-          ><input type="checkbox" data-setting="showLegalTargets" /><span>Highlight legal moves</span></label
-        >
-        <label class="checkbox"
-          ><input type="checkbox" data-setting="highlightLastMove" /><span>Highlight the last move</span></label
-        >
-        <label class="checkbox"
-          ><input type="checkbox" data-setting="autoRetry" /><span
-            >Ask again when the AI answers an illegal move</span
+          ><input type="checkbox" data-setting="showCoordinates" /><span data-i18n="settings.showCoordinates"
+            >Show coordinates</span
           ></label
         >
         <label class="checkbox"
-          ><input type="checkbox" data-setting="persistGame" /><span>Remember the game between sessions</span></label
+          ><input type="checkbox" data-setting="showLegalTargets" /><span data-i18n="settings.showLegalTargets"
+            >Highlight legal moves</span
+          ></label
         >
         <label class="checkbox"
-          ><input type="checkbox" data-setting="soundEnabled" /><span>Play sounds (move, capture, check)</span></label
-        >
-        <label class="checkbox"><input type="checkbox" data-setting="clockEnabled" /><span>Show clocks</span></label>
-        <label class="checkbox"
-          ><input type="checkbox" data-setting="animationsEnabled" /><span>Animate moves</span></label
+          ><input type="checkbox" data-setting="highlightLastMove" /><span data-i18n="settings.highlightLastMove"
+            >Highlight the last move</span
+          ></label
         >
         <label class="checkbox"
-          ><input type="checkbox" data-setting="evalBarEnabled" /><span>Show evaluation bar</span></label
+          ><input type="checkbox" data-setting="animationsEnabled" /><span data-i18n="settings.animationsEnabled"
+            >Animate moves</span
+          ></label
         >
-      </div>
-      <p class="hint">Settings are stored locally with <code>chrome.storage.local</code>. Nothing is uploaded.</p>
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="persistGame" /><span data-i18n="settings.persistGame"
+            >Remember the game between sessions</span
+          ></label
+        >
+      </fieldset>
+      <fieldset class="settings-group" id="settings-group-sound">
+        <legend id="settings-sound-group">Sound</legend>
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="soundEnabled" /><span data-i18n="settings.soundEnabled"
+            >Play wood sounds</span
+          ></label
+        >
+        <label class="field" for="settings-sound-volume"
+          ><span id="settings-sound-volume-label">Volume</span>
+          <input id="settings-sound-volume" type="range" min="0" max="1" step="0.05" value="0.4" />
+        </label>
+      </fieldset>
+      <fieldset class="settings-group" id="settings-group-clock">
+        <legend id="settings-clock-group">Clock</legend>
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="clockEnabled" /><span data-i18n="settings.clockEnabled"
+            >Show clocks</span
+          ></label
+        >
+        <label class="field" for="settings-clock-duration"
+          ><span id="settings-clock-duration-label">Minutes per side</span>
+          <input id="settings-clock-duration" class="select" type="number" min="1" max="60" step="1" value="5" />
+        </label>
+      </fieldset>
+      <fieldset class="settings-group" id="settings-group-ai">
+        <legend id="settings-ai-group">AI</legend>
+        <label class="field" for="settings-side"
+          ><span id="settings-play-as-label">Play as</span>
+          <select id="settings-side" class="select">
+            <option value="w" data-i18n="settings.playAsWhite">White (moves first)</option>
+            <option value="b" data-i18n="settings.playAsBlack">Black (the AI opens)</option>
+          </select>
+        </label>
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="autoRetry" /><span data-i18n="settings.autoRetry"
+            >Ask again when the AI answers an illegal move</span
+          ></label
+        >
+        <label class="field" for="settings-max-retries"
+          ><span id="settings-max-retries-label">Maximum retries</span>
+          <input id="settings-max-retries" class="select" type="number" min="0" max="5" step="1" value="2" />
+        </label>
+        <label class="field" for="settings-send-mode"
+          ><span id="settings-send-mode-label">Send mode</span>
+          <select id="settings-send-mode" class="select">
+            <option value="auto" data-i18n="settings.sendAuto">Auto — send one message</option>
+            <option value="manual" data-i18n="settings.sendManual">Manual — copy and paste</option>
+          </select>
+        </label>
+        <label class="field" for="settings-generation-wait"
+          ><span id="settings-generation-wait-label">Wait for generation (seconds)</span>
+          <input id="settings-generation-wait" class="select" type="number" min="5" max="180" step="1" value="120" />
+        </label>
+      </fieldset>
+      <fieldset class="settings-group" id="settings-group-engine">
+        <legend id="settings-engine-group">Engine</legend>
+        <label class="field" for="settings-engine-level"
+          ><span id="settings-engine-level-label">Local strength (1–8, no Elo)</span>
+          <select id="settings-engine-level" class="select">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+        <label class="checkbox"
+          ><input type="checkbox" data-setting="evalBarEnabled" /><span data-i18n="settings.evalBarEnabled"
+            >Show evaluation bar</span
+          ></label
+        >
+        <p id="settings-stockfish-notice" class="hint">
+          Strength-limited Stockfish is GPL-3, runs locally, no network. Its UCI_Elo scale is not FIDE.
+        </p>
+        <p id="match-engine-status" class="hint" role="status">Loading Stockfish…</p>
+        <label class="field" for="match-anchor"
+          ><span id="match-anchor-label">Stockfish anchor UCI_Elo</span>
+          <input id="match-anchor" class="select" type="number" step="10" disabled />
+        </label>
+        <label class="field" for="match-movetime"
+          ><span id="match-movetime-label">Move time (ms)</span>
+          <input
+            id="match-movetime"
+            class="select"
+            type="number"
+            min="100"
+            max="5000"
+            step="100"
+            value="500"
+            disabled
+          />
+        </label>
+        <div class="row">
+          <button id="match-start" type="button" class="button button-primary" disabled>Start rated game</button>
+          <button id="match-stop" type="button" class="button" hidden>Stop match</button>
+          <button id="match-export" type="button" class="button">Export match PGNs</button>
+        </div>
+      </fieldset>
+      <p id="settings-hint" class="hint">Settings are stored locally. Nothing is uploaded.</p>
       <div class="dialog-actions">
         <button id="settings-reset" type="button" class="button">Reset to defaults</button>
-        <form method="dialog"><button type="submit" class="button button-primary">Done</button></form>
+        <form method="dialog">
+          <button type="submit" class="button button-primary" data-i18n="settings.done">Done</button>
+        </form>
       </div>
     </dialog>
 
     <dialog id="pgn-dialog" class="dialog" aria-labelledby="pgn-title">
       <h2 id="pgn-title" class="dialog-title">Game PGN</h2>
-      <label class="visually-hidden" for="pgn-text">PGN text</label>
+      <label class="visually-hidden" for="pgn-text" data-i18n="pgn.title">Game PGN</label>
       <textarea id="pgn-text" class="textarea" spellcheck="false" rows="10" placeholder="Paste PGN here…"></textarea>
       <p id="pgn-status" class="hint" role="status" aria-live="polite"></p>
       <div class="dialog-actions">
         <button id="pgn-copy" type="button" class="button">Copy</button>
         <button id="pgn-load" type="button" class="button button-primary">Load into board</button>
-        <form method="dialog"><button type="submit" class="button">Close</button></form>
+        <form method="dialog"><button type="submit" class="button" data-i18n="generic.close">Close</button></form>
       </div>
     </dialog>
 
     <dialog id="fen-dialog" class="dialog" aria-labelledby="fen-dialog-title">
       <h2 id="fen-dialog-title" class="dialog-title">Set up position (FEN)</h2>
-      <label class="visually-hidden" for="fen-input">FEN text</label>
+      <label class="visually-hidden" for="fen-input" data-i18n="position.fen">Current FEN</label>
       <textarea
         id="fen-input"
         class="textarea"
@@ -330,7 +429,7 @@
       <p id="fen-dialog-status" class="hint" role="status" aria-live="polite"></p>
       <div class="dialog-actions">
         <button id="fen-apply" type="button" class="button button-primary">Apply</button>
-        <form method="dialog"><button type="submit" class="button">Close</button></form>
+        <form method="dialog"><button type="submit" class="button" data-i18n="generic.close">Close</button></form>
       </div>
     </dialog>
 
@@ -371,19 +470,21 @@
         </div>
       </dl>
       <form method="dialog" class="dialog-actions">
-        <button type="submit" class="button button-primary">Close</button>
+        <button type="submit" class="button button-primary" data-i18n="generic.close">Close</button>
       </form>
     </dialog>
 
     <dialog id="library-rename-dialog" class="dialog" aria-labelledby="library-rename-title">
       <h2 id="library-rename-title" class="dialog-title">Rename game</h2>
       <label class="field" for="library-rename-input">
-        <span>Title</span>
+        <span data-i18n="library.titleLabel">Title</span>
         <input id="library-rename-input" class="select" type="text" maxlength="200" />
       </label>
       <div class="dialog-actions">
-        <button id="library-rename-save" type="button" class="button button-primary">Save</button>
-        <form method="dialog"><button type="submit" class="button">Cancel</button></form>
+        <button id="library-rename-save" type="button" class="button button-primary" data-i18n="generic.save">
+          Save
+        </button>
+        <form method="dialog"><button type="submit" class="button" data-i18n="generic.cancel">Cancel</button></form>
       </div>
     </dialog>
 

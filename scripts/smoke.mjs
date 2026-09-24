@@ -58,15 +58,17 @@ try {
     history: "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6",
   });
 
-  const promptCandidates = extractMoveCandidates(prompt);
-  if (promptCandidates.length === 0) {
-    throw new Error("the prompt must contain the human move so the AI can see it");
+  if (!prompt.includes(`[${SCRIPT.at(-1)}]`) || !prompt.includes(position.toFen())) {
+    throw new Error("the prompt must contain the exact human move and current FEN");
+  }
+  if (extractMoveCandidates(prompt).length !== 0) {
+    throw new Error("a quoted prompt must never be parsed as an assistant reply");
   }
 
-  const reply = `Sure! I play [g8f6]. Position after: ${position.toFen()}`;
+  const reply = `Sure! I play [b5a4]. Position after: ${position.toFen()}`;
   const replyCandidates = extractMoveCandidates(reply);
-  if (replyCandidates[0] !== "g8f6") {
-    throw new Error(`expected g8f6 from the sample reply, got ${replyCandidates.join(", ")}`);
+  if (replyCandidates[0] !== "b5a4") {
+    throw new Error(`expected b5a4 from the sample reply, got ${replyCandidates.join(", ")}`);
   }
 
   const aiMove = position.moveFromUci(replyCandidates[0]);
