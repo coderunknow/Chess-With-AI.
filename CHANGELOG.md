@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-09-24
+
+### Fixed
+
+- **Uneven board squares**: `.board` only pinned the 8 columns, so the implicit `auto` rows grew
+  with piece glyphs — ranks holding pieces rendered taller than empty ranks (and the grid could
+  overflow its aspect box). The grid now pins `grid-template-rows: repeat(8, minmax(0, 1fr))`, and
+  empty `.piece` spans reserve the same line box as occupied ones via a hidden `::before`.
+- **Panel nudged down on left-click**: every square click re-rendered the move list, which called
+  `scrollIntoView({ block: "nearest" })` unconditionally — scrolling the whole side-panel document
+  whenever the moves sat below the fold. The list now auto-scrolls only when the moves/cursor
+  actually change, and moves just its own container (`scrollTop`), never the page.
+- **Tap/drag double handling**: `pointerup` handled taps/drags and the trailing compatibility
+  `click` then fired `onSelect` again — a tap selected and instantly deselected a piece, and a
+  drag reselected its origin. The pointer gesture now claims the following `click`
+  (keyboard/assistive-tech clicks without pointer events still work).
+
+### Added
+
+- Regression tests: `test/board-interaction.test.js` (tap-once, drag-once, empty-square click
+  path, pointer-less click, scoped move-list scrolling) plus markup guards for the 8-row grid and
+  the `scrollIntoView` ban in `history.js`.
+
 ## [0.2.1] - 2026-09-24
 
 ### Fixed

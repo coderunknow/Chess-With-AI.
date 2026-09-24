@@ -79,6 +79,8 @@ export class HistoryView {
   #emptyState;
   /** @type {(ply:number)=>void} */
   #onSelectPly;
+  /** @type {string|null} move-list signature of the last auto-scroll. */
+  #lastScrollKey = null;
 
   /**
    * @param {object} options
@@ -139,9 +141,54 @@ export class HistoryView {
     }
 
     this.#root.replaceChildren(fragment);
+    this.#scrollCurrentRowIntoView(history, options);
+  }
+
+  /**
+   * Keeps the current row visible inside the move list — and only inside the
+   * move list. The DOM scrolling helper that scrolls every ancestor is
+   * deliberately avoided here: selecting a piece re-renders the list, so it
+   * would nudge the whole side panel downwards whenever the moves sat below
+   * the fold. Selection-only re-renders skip scrolling entirely.
+   *
+   * @param {ReadonlyArray<import('./game.js').MoveEntry>} history
+   * @param {object} [options] forwarded to {@link describeHistory}.
+   */
+  #scrollCurrentRowIntoView(history, options) {
+    const currentPly = options?.currentPly ?? history.length;
+    const key = `${history.length}:${currentPly}`;
+    if (key === this.#lastScrollKey) {
+      return;
+    }
+    this.#lastScrollKey = key;
+
     const current =
       this.#root.querySelector(".history-row.is-replay-current") || this.#root.querySelector(".history-row.is-current");
-    current?.scrollIntoView({ block: "nearest" });
+    if (!current) {
+      return;
+    }
+    const list = this.#root;
+    if (typeof list.scrollTop !== "number") {
+      return;
+    }
+    let listRect;
+    let rowRect;
+    try {
+      listRect = list.getBoundingClientRect();
+      rowRect = current.getBoundingClientRect();
+    } catch {
+      return;
+    }
+    if (!listRect || !rowRect) {
+      return;
+    }
+    const overflowBottom = rowRect.bottom - listRect.bottom;
+    const overflowTop = listRect.top - rowRect.top;
+    if (overflowBottom > 0) {
+      list.scrollTop += overflowBottom;
+    } else if (overflowTop > 0) {
+      list.scrollTop -= overflowTop;
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "ai-chess-companion",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Play chess against Gemini, ChatGPT, Claude, Grok, Perplexity and Copilot from Chrome's side panel.",
   "private": true,
   "type": "module",
