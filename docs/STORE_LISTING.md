@@ -1,98 +1,59 @@
-# Chrome Web Store Listing — AI Chess Companion
+# Chrome Web Store Listing — AI Chess Companion v0.5.0
 
-## Short Name
+## Short name
 
 AI Chess Companion
 
-## Detailed Name
+## Summary (132 characters max)
 
-AI Chess Companion — Chess With AI
+Play chess with six AI chats in Chrome's side panel. Pin one tab, validate moves, or run a local Stockfish Elo match.
 
-## Summary (132 chars max)
+## Description
 
-Play chess alongside Gemini, ChatGPT, Claude, Grok & more. Side panel board, auto prompts, parses AI moves. Privacy-first.
+**Play chess with your own AI chat — on a real board beside the conversation.**
 
-## Description (Full)
-
-**Play chess WITH your favorite AI, not just against a bot.**
-
-AI Chess Companion adds a beautiful chess board to Chrome's side panel while you chat with Gemini, ChatGPT, Claude, Grok, Perplexity, and Copilot. You are White, AI is Black. Your moves are automatically sent to the AI, and AI's replies like `[e7e5]` are parsed to update the board.
+Pin **one** supported tab: Gemini, ChatGPT, Claude, Grok, Perplexity or Copilot. Play White or start a new game as Black. Your legal move, FEN and history go only to that pinned chat; focus changes do not redirect it. The reply is checked by a complete local rules engine, and illegal AI moves get a clear reason and a bounded correction. No AI account, extension API key, remote chess service, analytics or telemetry.
 
 ### Features
 
-♞ Side panel board — always visible alongside chat
-🤖 Works with Gemini, ChatGPT, Claude, Grok, Perplexity, Copilot
-⚡ Auto prompting — sends FEN + UCI move to AI
-👁️ Smart parsing — watches AI responses for [e2e4] moves
-♔ Full chess rules — castling, en passant, promotion, check detection
-🔒 Privacy first — no servers, no tracking, 100% local
-🎨 Dark theme, Unicode pieces, legal-move highlights
+- Responsive board, promotion chooser, PGN import/export, local library, optional clocks and off-by-default synthesized wood sounds.
+- Automatic send **waits for the model to finish**; it never clicks Stop or presses Enter after clicking Send. If the full prompt cannot be verified, use Copy prompt instead. **Manual** mode copies the prompt so you can paste and send it yourself.
+- **Pause / Resume** disconnects the transcript observer, stops local workers and shows `OFF` on the toolbar. It persists; closing the panel alone does not auto-pause.
+- Hint / Analyse / local Play vs engine use a heuristic strength control **1–8**, **not Elo**.
+- Optional **rated Stockfish match**: a packaged, single-threaded Stockfish.js **17.1 Lite NNUE WASM** plays actual moves against the chat AI in the pinned tab. Requires Auto mode and a live pin. Completed chess results, not protocol errors or unfinished games, update a local maximum-likelihood estimate. See **games, W–D–L, point estimate and 95% interval**, marked provisional when evidence is weak. **Stockfish UCI_Elo scale, not FIDE**, and not a website rating. The engine's reported UCI_Elo bounds control the anchor; no depth-to-Elo conversion.
+- English/Vietnamese, light/dark/system UI, classic/blue/green/high-contrast board, reduced-motion-aware piece animation.
 
-### How to Use
+### How to use
 
-1. Open gemini.google.com, chatgpt.com, claude.ai, grok.com, perplexity.ai or copilot.microsoft.com
-2. Click the extension icon to open side panel
-3. Play as White — click piece then destination
-4. Your move [e2e4] + FEN is auto-sent to AI
-5. AI replies with [e7e5] — board updates!
-6. Tip: Tell AI "Always reply with move in brackets like [e7e5]"
+1. Open a supported AI chat, open the panel, and **pin** its tab in **AI chat connections**.
+2. Move a piece. The request is sent at most once, and only a _new_ assistant reply can become a move.
+3. Set **AI → Send mode: Manual** if you prefer to paste the copied prompt yourself.
+4. To measure the chat model against Stockfish, use **Settings → Engine → Start rated game** once Stockfish is ready. This confirms and starts a new game. Export completed match PGNs whenever you like.
 
-### Privacy
+### Privacy and permissions
 
-No data collection. No analytics. No external servers. Chess engine runs locally. Only prompts you send to your chosen AI chat leave the browser.
+The extension's own code makes no remote fetch, socket, telemetry or rating-server request. The only off-device chess data is the message you submit to **your own AI chat**; that provider's privacy policy applies. The supported-tab picker reads titles via content scripts; the chosen tab URL/title and settings, games and match PGNs stay in local/session browser storage. Host access is limited to the eight declared hostnames of six services. `sidePanel` displays the UI, `storage` saves on-device state, `scripting` injects the packaged content script when needed. No `tabs`, `management` or general browsing-history permission.
 
-### Permissions Explained
+### Open source and licenses
 
-- `sidePanel`: show the chess board beside the chat
-- `storage`: keep your settings and the running game on your own device
-- `scripting`: inject the bridge on AI pages if the tab was opened before the extension was installed
-- Hosts: only the AI chat domains listed above — no `<all_urls>`, no browsing-history access
+Extension code is **MIT** ([LICENSE](../LICENSE)). The separate vendored **Stockfish.js 17.1 Lite WASM** is **GPL-3**, local and network-free; GPL text, authors, the **bundled corresponding Lite source**, exact upstream revision and checksums ship in [`engine/stockfish/`](../engine/stockfish/SOURCE.md). No runtime npm dependencies, CDN or remote executable code.
 
-### Open Source
+## Category / languages / assets
 
-MIT licensed. GitHub: github.com/coderunknow/Chess-With-AI
+Games / Fun. English and Vietnamese. Icons: 16/48/128px in `icons/`.
 
----
+Screenshots to prepare: (1) board and visibly pinned tab, (2) manual/Stop-wait status, (3) translated illegal-move explanation, (4) Stockfish match with n/W–D–L/interval/non-FIDE label, (5) Pause `OFF` badge. 1280×800 or 640×400.
 
-## Category
+## Privacy tab answers
 
-Games / Fun
+**Single purpose:** Play legal chess with a selected AI chat in the side panel and optionally estimate the chat model against packaged strength-limited Stockfish.
 
-## Language
+**Data usage:** No analytics, telemetry, backend, remote executable code or rating server. Prompts entered in the user's AI chat are subject to that chat's terms. On-device storage may contain chat titles/URLs, PGNs, and settings.
 
-English
+**Host permissions:** Only to list the supported AI tabs and run the packaged content bridge in the user's chosen chat. No `<all_urls>`.
 
-## Screenshots Needed (1280x800 or 640x400)
+## Before store submission
 
-1. Board on Gemini with move sent
-2. Board on ChatGPT with AI reply [e7e5]
-3. Legal move highlights + FEN display
-4. Dark theme closeup + reset button
-5. Supported AI logos grid
-
-## Icon Sizes
-
-- 16x16, 48x48, 128x128 PNG are in `icons/` and wired into `manifest.json`
-- Source artwork: glowing knight on the panel background colour (`#101317`)
-
-## Privacy Tab Answers
-
-**Single purpose:** Play chess with AI chat assistants via side panel board that bridges UCI moves.
-
-**Permissions justification:** Already in description.
-
-**Data usage:**
-
-- Does not collect user data
-- Does not use remote code
-
-**Host permissions justification:** Need to inject content script to automate typing move prompts into AI chat inputs and observe AI responses for UCI moves. Only whitelisted AI domains.
-
-## TODO Before Submission
-
-- [x] Create icons (16/48/128) and wire them into `manifest.json`
-- [ ] Take 3–5 screenshots at 1280x800
-- [ ] Add promotional tile 440x280 (optional), marquee 1400x560 (optional)
-- [ ] Run the manual checklist in `docs/DEVELOPMENT.md` on every supported host
-- [ ] Host the privacy policy (link to `PRIVACY.md`, or a rendered copy)
-- [ ] Upload `build/ai-chess-companion-0.1.0.zip` produced by `npm run package`
+- [ ] Manual browser checklist on **all six** supported hosts (`docs/DEVELOPMENT.md`); automated DOM doubles do not certify live site layouts.
+- [ ] Create screenshots and host the privacy policy.
+- [ ] Run `npm run verify && npm run package`; upload `build/ai-chess-companion-0.5.0.zip` with its GPL-3 engine notice.

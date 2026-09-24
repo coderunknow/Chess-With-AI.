@@ -10,10 +10,11 @@ import { FakeElement, installFakeDom } from "./helpers/fake-dom.js";
 /**
  * Mounts a playable board against the DOM doubles.
  *
- * @returns {{dom: object, root: FakeElement, selects: number[], drops: number[][], buttonFor: (square: number) => FakeElement}}
+ * @returns {{dom: object, root: FakeElement, view: BoardView, selects: number[], drops: number[][], buttonFor: (square: number) => FakeElement}}
  */
-function mountBoard() {
+function mountBoard({ reducedMotion = false } = {}) {
   const dom = installFakeDom();
+  if (reducedMotion) window.matchMedia = () => ({ matches: true });
   const document = dom.document;
   const root = document.createElement("div");
   document.body.append(root);
@@ -29,13 +30,14 @@ function mountBoard() {
   // `dataset` is also not reflected to attributes, so mirror `data-square`.
   for (const button of root.children) {
     button.setAttribute("data-square", button.dataset.square);
+    dom.register(button, ["[data-square]"]);
     const piece = button.firstElementChild;
     if (piece) {
       dom.register(piece, [".piece"]);
     }
   }
   const buttonFor = (square) => root.children.find((button) => button.dataset.square === String(square));
-  return { dom, root, selects, drops, buttonFor };
+  return { dom, root, view, selects, drops, buttonFor };
 }
 
 /**
@@ -80,6 +82,41 @@ test("dragging a piece drops once and the trailing click reselects nothing", () 
   }
 });
 
+test("pointer-captured drag uses the square under release coordinates, not the captured source", () => {
+  const env = mountBoard();
+  try {
+    const from = parseSquare("g1");
+    const to = parseSquare("f3");
+    const start = env.buttonFor(from);
+    const end = env.buttonFor(to);
+    env.dom.document.elementFromPoint = () => end;
+    env.root.dispatch("pointerdown", { target: start, button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    env.root.dispatch("pointermove", { target: start, clientX: 140, clientY: 60, pointerId: 1 });
+    env.root.dispatch("pointerup", { target: start, clientX: 140, clientY: 60, pointerId: 1 });
+    env.root.dispatch("click", { target: start });
+    assert.deepEqual(env.drops, [[from, to]]);
+    assert.deepEqual(env.selects, []);
+  } finally {
+    env.dom.restore();
+  }
+});
+
+test("an off-board release does not select the captured source on the trailing click", () => {
+  const env = mountBoard();
+  try {
+    const start = env.buttonFor(parseSquare("g1"));
+    env.dom.document.elementFromPoint = () => env.dom.document.body;
+    env.root.dispatch("pointerdown", { target: start, button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    env.root.dispatch("pointermove", { target: start, clientX: 140, clientY: 60, pointerId: 1 });
+    env.root.dispatch("pointerup", { target: start, clientX: 140, clientY: 60, pointerId: 1 });
+    env.root.dispatch("click", { target: start });
+    assert.deepEqual(env.drops, []);
+    assert.deepEqual(env.selects, []);
+  } finally {
+    env.dom.restore();
+  }
+});
+
 test("tapping an empty square still activates it through the click path", () => {
   const env = mountBoard();
   try {
@@ -99,6 +136,108 @@ test("a click without preceding pointer events is still honoured", () => {
     assert.deepEqual(env.selects, [e2]);
   } finally {
     env.dom.restore();
+  }
+});
+
+function recordAnimations(document) {
+  const originalCreate = document.createElement;
+  const animations = [];
+  document.createElement = (...args) => {
+    const element = originalCreate(...args);
+    element.animate = (frames, options) => {
+      let finish;
+      const finished = new Promise((resolve) => {
+        finish = resolve;
+      });
+      animations.push({ element, frames, options, finish });
+      return { finished };
+    };
+    return element;
+  };
+  return animations;
+}
+
+function flightNodes(root) {
+  return root.children.filter((child) => child.classList.contains("piece-flight"));
+}
+
+function playAndRender(env, position, uci, animationsEnabled = true) {
+  const move = position.moveFromUci(uci);
+  assert.ok(move, `${uci} must be legal in the test position`);
+  position.makeMove(move);
+  env.view.render(
+    describeBoard({
+      position,
+      lastMove: { from: move.from, to: move.to },
+    }),
+    { animationsEnabled },
+  );
+}
+
+test("a move glides once on the same stable square nodes and reveals its destination on completion", async () => {
+  const env = mountBoard();
+  try {
+    const animations = recordAnimations(env.dom.document);
+    const destination = env.buttonFor(parseSquare("e4"));
+    const position = Position.start();
+    playAndRender(env, position, "e2e4");
+    assert.equal(animations.length, 1);
+    assert.equal(animations[0].options.duration, 180);
+    assert.equal(flightNodes(env.root).length, 1);
+    assert.equal(env.buttonFor(parseSquare("e4")), destination, "animation never replaces the focusable square");
+    assert.equal(destination.firstElementChild.style.opacity, "0");
+    animations[0].finish();
+    await Promise.resolve();
+    assert.equal(flightNodes(env.root).length, 0);
+    assert.equal(destination.firstElementChild.style.opacity, "");
+    env.view.render(describeBoard({ position, lastMove: { from: parseSquare("e2"), to: parseSquare("e4") } }));
+    assert.equal(animations.length, 1, "a status-only render cannot replay the same animation");
+  } finally {
+    env.dom.restore();
+  }
+});
+
+test("captures fade, castling moves both pieces, and en passant fades the off-target pawn", () => {
+  const env = mountBoard();
+  try {
+    const animations = recordAnimations(env.dom.document);
+    const renderPosition = (fen) => {
+      const position = Position.fromFen(fen);
+      env.view.render(describeBoard({ position }));
+      return position;
+    };
+    let position = renderPosition("4k3/8/8/4p3/3P4/8/8/4K3 w - - 0 1");
+    playAndRender(env, position, "d4e5");
+    assert.equal(flightNodes(env.root).length, 2, "capturer glides and captured pawn fades");
+    assert.ok(animations.some((entry) => entry.options.duration === 130));
+
+    position = renderPosition("4k3/8/8/8/8/8/8/4K2R w K - 0 1");
+    playAndRender(env, position, "e1g1");
+    assert.equal(flightNodes(env.root).length, 2, "castling animates king and rook");
+    assert.equal(animations.filter((entry) => entry.options.duration === 180).length, 3);
+
+    position = renderPosition("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2");
+    playAndRender(env, position, "e5d6");
+    assert.equal(flightNodes(env.root).length, 2, "en passant fades the pawn on d5, not on d6");
+    assert.equal(flightNodes(env.root)[1].textContent, "♟");
+  } finally {
+    env.dom.restore();
+  }
+});
+
+test("disabled or reduced-motion animations paint instantly with no hidden piece", () => {
+  for (const reducedMotion of [false, true]) {
+    const env = mountBoard({ reducedMotion });
+    try {
+      const animations = recordAnimations(env.dom.document);
+      const position = Position.start();
+      playAndRender(env, position, "e2e4", !reducedMotion ? false : true);
+      assert.equal(animations.length, 0);
+      assert.equal(flightNodes(env.root).length, 0);
+      assert.notEqual(env.buttonFor(parseSquare("e4")).firstElementChild.style.opacity, "0");
+    } finally {
+      env.dom.restore();
+    }
   }
 });
 

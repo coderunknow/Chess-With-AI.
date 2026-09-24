@@ -173,3 +173,26 @@ test("settings are validated on read", async () => {
   assert.equal(normaliseSettings({ persistGame: "yes" }).persistGame, DEFAULT_SETTINGS.persistGame);
   assert.equal(mergeSettings({ autoRetry: false }).showCoordinates, DEFAULT_SETTINGS.showCoordinates);
 });
+
+test("new settings are persisted and clamped without fake low Elo", async () => {
+  const { normaliseSettings } = await import("../src/shared/settings.js");
+  const bad = normaliseSettings({
+    sendMode: "unsafe",
+    generationWaitMs: 999999,
+    soundVolume: 99,
+    clockDurationMs: 500,
+    matchAnchorElo: -500,
+    matchMoveTimeMs: 50,
+    paused: "true",
+  });
+  assert.equal(bad.sendMode, "auto");
+  assert.equal(bad.generationWaitMs, 180000);
+  assert.equal(bad.soundVolume, 1);
+  assert.equal(bad.clockDurationMs, 60000);
+  assert.equal(bad.matchMoveTimeMs, 100);
+  assert.equal(bad.paused, false);
+  // Settings storage cannot pretend a sub-minimum value was ever played;
+  // the UCI controller clamps again to its binary-reported range at startup.
+  const { clampUciElo } = await import("../src/ui/stockfish.js");
+  assert.equal(clampUciElo(bad.matchAnchorElo, { min: 1320, max: 3190 }), 1320);
+});

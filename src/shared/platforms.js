@@ -38,6 +38,7 @@
  * @property {string[]} user legacy: CSS selectors for human messages.
  * @property {SelectorCandidate[]} inputCandidates ordered candidates for composer.
  * @property {SelectorCandidate[]} sendCandidates ordered candidates for send button.
+ * @property {SelectorCandidate[]} stopCandidates stop/generation candidates for this host.
  * @property {SelectorCandidate[]} assistantCandidates ordered candidates for assistant messages.
  * @property {SelectorCandidate[]} userCandidates ordered candidates for user messages.
  * @property {SelectorCandidate[]} transcriptCandidates ordered candidates for transcript root.
@@ -76,6 +77,11 @@ export const PLATFORMS = Object.freeze([
         description: "Lexical editor fallback",
       },
       { selector: "form textarea", strategy: "form-ancestor", description: "Form textarea fallback" },
+    ]),
+    stopCandidates: Object.freeze([
+      { selector: "button[aria-label*='stop' i]", strategy: "aria-label" },
+      { selector: "button[title*='stop' i]", strategy: "aria-label" },
+      { selector: "[data-is-streaming='true']", strategy: "semantic" },
     ]),
     sendCandidates: Object.freeze([
       { selector: "button.send-button", strategy: "semantic", description: "Legacy send button class" },
@@ -141,6 +147,11 @@ export const PLATFORMS = Object.freeze([
       },
       { selector: "div[contenteditable='true'][role='textbox']", strategy: "role", description: "Role textbox" },
       { selector: "form textarea", strategy: "form-ancestor", description: "Form textarea fallback" },
+    ]),
+    stopCandidates: Object.freeze([
+      { selector: "[data-testid*='stop' i]", strategy: "testid" },
+      { selector: "button[aria-label*='stop' i]", strategy: "aria-label" },
+      { selector: "[data-is-streaming='true']", strategy: "semantic" },
     ]),
     sendCandidates: Object.freeze([
       { selector: "[data-testid='send-button']", strategy: "testid", description: "Send button testid" },
@@ -210,6 +221,11 @@ export const PLATFORMS = Object.freeze([
       },
       { selector: "div[contenteditable='true']", strategy: "contenteditable", description: "Generic contenteditable" },
     ]),
+    stopCandidates: Object.freeze([
+      { selector: "button[aria-label*='stop' i]", strategy: "aria-label" },
+      { selector: "[data-testid*='stop' i]", strategy: "testid" },
+      { selector: "[data-is-streaming='true']", strategy: "semantic" },
+    ]),
     sendCandidates: Object.freeze([
       { selector: "button[aria-label='Send message']", strategy: "aria-label", description: "Send message label" },
       { selector: "button[data-testid*='send' i]", strategy: "testid", description: "Send testid" },
@@ -258,6 +274,11 @@ export const PLATFORMS = Object.freeze([
       { selector: "div[contenteditable='true']", strategy: "contenteditable", description: "Generic contenteditable" },
       { selector: "[role='textbox']", strategy: "role", description: "Role textbox generic" },
     ]),
+    stopCandidates: Object.freeze([
+      { selector: "button[aria-label*='stop' i]", strategy: "aria-label" },
+      { selector: "[data-testid*='stop' i]", strategy: "testid" },
+      { selector: "[data-is-streaming='true']", strategy: "semantic" },
+    ]),
     sendCandidates: Object.freeze([
       { selector: "button[type='submit']", strategy: "form-ancestor", description: "Submit type" },
       { selector: "button[data-testid*='send' i]", strategy: "testid", description: "Send testid" },
@@ -300,6 +321,11 @@ export const PLATFORMS = Object.freeze([
       { selector: "div[contenteditable='true'][role='textbox']", strategy: "role", description: "Role textbox" },
       { selector: "div[contenteditable='true']", strategy: "contenteditable", description: "Generic contenteditable" },
       { selector: "textarea", strategy: "textarea", description: "Generic textarea" },
+    ]),
+    stopCandidates: Object.freeze([
+      { selector: "button[aria-label*='stop' i]", strategy: "aria-label" },
+      { selector: "button[title*='stop' i]", strategy: "aria-label" },
+      { selector: "[data-is-streaming='true']", strategy: "semantic" },
     ]),
     sendCandidates: Object.freeze([
       { selector: "button[aria-label*='Submit' i]", strategy: "aria-label", description: "Submit label" },
@@ -348,6 +374,11 @@ export const PLATFORMS = Object.freeze([
       { selector: "div[contenteditable='true'][role='textbox']", strategy: "role", description: "Role textbox" },
       { selector: "div[contenteditable='true']", strategy: "contenteditable", description: "Generic contenteditable" },
     ]),
+    stopCandidates: Object.freeze([
+      { selector: "[data-testid*='stop' i]", strategy: "testid" },
+      { selector: "button[aria-label*='stop' i]", strategy: "aria-label" },
+      { selector: "[data-is-streaming='true']", strategy: "semantic" },
+    ]),
     sendCandidates: Object.freeze([
       { selector: "button[data-testid='submit-button']", strategy: "testid", description: "Submit testid" },
       { selector: "button[title*='Submit' i]", strategy: "aria-label", description: "Submit title" },
@@ -385,6 +416,21 @@ export const GENERIC_SEND_SELECTORS = Object.freeze([
   "button[aria-label*='submit' i]",
   "button[title*='submit' i]",
   "button[type='submit']",
+]);
+
+/** Semantic stop/streaming candidates, applied on every supported host. */
+export const GENERIC_STOP_SELECTORS = Object.freeze([
+  "button[aria-label*='stop' i]",
+  "button[title*='stop' i]",
+  "button[data-testid*='stop' i]",
+  "button[aria-label*='cancel' i]",
+  "button[aria-label*='interrupt' i]",
+  "button[aria-label*='dừng' i]",
+  "[role='button'][aria-label*='stop' i]",
+  "[data-is-streaming='true']",
+  "[data-streaming='true']",
+  "[data-status='streaming']",
+  "[data-message-author-role='assistant'][aria-busy='true']",
 ]);
 
 /** Every hostname the extension is allowed to touch. */
@@ -531,4 +577,13 @@ export function currentHostSelectorList(kind, hostname = globalThis.location?.ho
     default:
       return "";
   }
+}
+
+/** Semantic stop/streaming candidates for this host, then shared fallbacks. */
+export function stopCandidatesForHost(hostname) {
+  const platform = platformForHost(hostname);
+  return [
+    ...(platform?.stopCandidates || []),
+    ...GENERIC_STOP_SELECTORS.map((selector) => ({ selector, strategy: "generic" })),
+  ];
 }

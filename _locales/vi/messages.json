@@ -24,5 +24,374 @@
   "noAi": {
     "message": "Không phát hiện tab AI",
     "description": "No AI tab"
+  },
+  "connections_pinned": {
+    "message": "Đã ghim: {platform} — {title}"
+  },
+  "connections_choosePin": {
+    "message": "Chọn và ghim một tab AI được hỗ trợ trước khi gửi lời nhắc."
+  },
+  "connections_noTabs": {
+    "message": "Chưa mở tab AI phù hợp. Mở tab bên dưới rồi làm mới."
+  },
+  "connections_pinMarker": {
+    "message": "ĐÃ GHIM"
+  },
+  "connections_pinLost": {
+    "message": "Tab AI đã ghim bị đóng hoặc rời trang được hỗ trợ. Chọn tab khác; chưa gửi lời nhắc."
+  },
+  "connections_pinFailed": {
+    "message": "Không thể ghim tab này. Hãy mở trang AI được hỗ trợ rồi thử lại."
+  },
+  "connections_unpinned": {
+    "message": "Đã bỏ ghim tab AI. Hãy chọn tab trước lời nhắc tiếp theo."
+  },
+  "connections_refresh": {
+    "message": "Làm mới tab"
+  },
+  "connections_unpin": {
+    "message": "Bỏ ghim"
+  },
+  "connections_tabList": {
+    "message": "Các tab AI đang mở"
+  },
+  "controls_playWhite": {
+    "message": "Chơi Trắng"
+  },
+  "controls_playBlack": {
+    "message": "Chơi Đen"
+  },
+  "controls_pause": {
+    "message": "Tạm dừng"
+  },
+  "controls_resume": {
+    "message": "Tiếp tục"
+  },
+  "controls_confirmSide": {
+    "message": "Bắt đầu ván MỚI với bên còn lại? Ván hiện tại sẽ kết thúc."
+  },
+  "controls_switchSideTitle": {
+    "message": "Bắt đầu ván mới với bên còn lại"
+  },
+  "status_sideNewGame": {
+    "message": "Bạn chơi {color}. Đã bắt đầu ván mới."
+  },
+  "status_paused": {
+    "message": "Đã tạm dừng. Không gửi lời nhắc hoặc theo dõi phản hồi."
+  },
+  "status_resumed": {
+    "message": "Đã tiếp tục. Hãy yêu cầu AI khi cần phản hồi."
+  },
+  "status_waitGeneration": {
+    "message": "Đang chờ {platform} trả lời xong… Đừng nhấn Enter."
+  },
+  "status_manualSend": {
+    "message": "Sao chép lời nhắc, dán và tự gửi trong tab AI đã ghim. Phản hồi vẫn được theo dõi."
+  },
+  "status_manualCopied": {
+    "message": "Đã sao chép lời nhắc. Hãy dán và tự gửi trong tab AI đã ghim; đang chờ tin nhắn."
+  },
+  "status_generationTimeout": {
+    "message": "AI vẫn đang trả lời. Chưa gửi lời nhắc; hãy sao chép để gửi sau."
+  },
+  "status_verifyFailed": {
+    "message": "Ô nhập không chứa toàn bộ lời nhắc. Chưa gửi gì; hãy sao chép."
+  },
+  "status_retryReason": {
+    "message": "Đang hỏi lại (lần {attempt}) — {reason}"
+  },
+  "status_illegalReason": {
+    "message": "AI trả lời [{move}]: {reason} Hỏi lại để sửa nước đi."
+  },
+  "status_outOfTurn": {
+    "message": "Bỏ qua [{move}]: đến lượt của bạn."
+  },
+  "status_noMove": {
+    "message": "không có nước đi"
+  },
+  "status_repeatedMove": {
+    "message": "nước đi lặp lại"
+  },
+  "status_aiResigned": {
+    "message": "AI đã xin thua. Hãy bắt đầu ván mới."
+  },
+  "status_sendFailure": {
+    "message": "Không gửi được lời nhắc: {detail} Hãy sao chép."
+  },
+  "settings_groupBoard": {
+    "message": "Bàn cờ"
+  },
+  "settings_groupSound": {
+    "message": "Âm thanh"
+  },
+  "settings_groupClock": {
+    "message": "Đồng hồ"
+  },
+  "settings_groupAi": {
+    "message": "AI"
+  },
+  "settings_groupEngine": {
+    "message": "Engine"
+  },
+  "settings_maxRetries": {
+    "message": "Số lần hỏi lại tối đa"
+  },
+  "settings_sendMode": {
+    "message": "Chế độ gửi"
+  },
+  "settings_sendAuto": {
+    "message": "Tự động — gửi một tin nhắn"
+  },
+  "settings_sendManual": {
+    "message": "Thủ công — sao chép và dán"
+  },
+  "settings_generationWait": {
+    "message": "Chờ AI trả lời xong (giây)"
+  },
+  "settings_soundVolume": {
+    "message": "Âm lượng"
+  },
+  "settings_clockDuration": {
+    "message": "Phút mỗi bên"
+  },
+  "settings_localLevel": {
+    "message": "Độ mạnh cục bộ (1–8, không phải Elo)"
+  },
+  "match_title": {
+    "message": "Trận đo Elo với Stockfish"
+  },
+  "match_scale": {
+    "message": "Stockfish UCI_Elo scale, not FIDE — thang UCI_Elo của Stockfish, không phải FIDE"
+  },
+  "match_stockfishNotice": {
+    "message": "Stockfish giới hạn sức mạnh theo GPL-3, chạy cục bộ, không kết nối mạng. Stockfish UCI_Elo scale, not FIDE."
+  },
+  "match_loading": {
+    "message": "Đang tải Stockfish…"
+  },
+  "match_engineReady": {
+    "message": "Stockfish sẵn sàng. Khoảng UCI_Elo: {min}–{max}."
+  },
+  "match_engineError": {
+    "message": "Không dùng được Stockfish: {detail} Trận đo sức mạnh bị tắt."
+  },
+  "match_paused": {
+    "message": "Stockfish đã dừng khi tạm nghỉ. Tiếp tục để tải lại."
+  },
+  "match_unavailable": {
+    "message": "WASM chưa khởi động"
+  },
+  "match_noGames": {
+    "message": "Chưa có ván xếp hạng. Hãy hoàn tất một ván thật với AI trong tab đã ghim."
+  },
+  "match_estimate": {
+    "message": "{n} ván · Thắng–Hòa–Thua {wins}–{draws}–{losses} · {rating} {boundary} · khoảng 95% [{low}, {high}] {provisional}"
+  },
+  "match_provisional": {
+    "message": "tạm tính"
+  },
+  "match_boundary": {
+    "message": "(MLE ở biên)"
+  },
+  "match_anchor": {
+    "message": "Mốc Stockfish UCI_Elo"
+  },
+  "match_moveTime": {
+    "message": "Thời gian mỗi nước (ms)"
+  },
+  "match_start": {
+    "message": "Bắt đầu ván xếp hạng"
+  },
+  "match_stop": {
+    "message": "Dừng trận"
+  },
+  "match_export": {
+    "message": "Xuất PGN trận đấu"
+  },
+  "match_exported": {
+    "message": "Đã sao chép và xuất PGN trận đấu."
+  },
+  "match_requiresAuto": {
+    "message": "Trận xếp hạng cần chế độ Gửi tự động. Đổi trong cài đặt AI."
+  },
+  "match_requiresPin": {
+    "message": "Trận xếp hạng cần một tab AI đang mở và đã ghim."
+  },
+  "match_confirmReplace": {
+    "message": "Bắt đầu trận Stockfish xếp hạng? Ván MỚI sẽ thay thế bàn cờ hiện tại."
+  },
+  "match_started": {
+    "message": "Đã bắt đầu ván xếp hạng. AI chơi {color}; mốc Stockfish {anchor}."
+  },
+  "match_engineThinking": {
+    "message": "Stockfish đang chọn nước ở UCI_Elo {anchor}…"
+  },
+  "match_unratedProtocol": {
+    "message": "Lỗi giao thức: ván chưa xong / không tính điểm. Engine không đi thay AI."
+  },
+  "match_unratedStopped": {
+    "message": "Đã dừng trận: ván chưa xong / không tính điểm."
+  },
+  "match_pinLost": {
+    "message": "Mất tab đã ghim: ván chưa xong / không tính điểm. Hãy ghim tab khác."
+  },
+  "match_storageError": {
+    "message": "Không lưu được ván xếp hạng. Không cập nhật ước lượng."
+  },
+  "match_finished": {
+    "message": "Ván xếp hạng kết thúc: {result}. Xem ước lượng trong Phân tích."
+  },
+  "match_running": {
+    "message": "Hãy dừng trận xếp hạng trước khi nạp ván khác."
+  },
+  "analysis_confirmEngine": {
+    "message": "Bắt đầu ván MỚI với engine heuristic cục bộ? Bàn cờ hiện tại sẽ bị thay thế."
+  },
+  "analysis_engineMode": {
+    "message": "Đã bắt đầu ván với engine cục bộ (độ mạnh 1–8, không phải Elo)."
+  },
+  "analysis_engineFailed": {
+    "message": "Engine cục bộ không thể đi."
+  },
+  "illegal_malformed": {
+    "message": "Nước đi tọa độ sai định dạng."
+  },
+  "illegal_empty_square": {
+    "message": "Ô xuất phát {from} trống."
+  },
+  "illegal_opponent_piece": {
+    "message": "Quân ở {from} thuộc về bên kia."
+  },
+  "illegal_does_not_move_that_way": {
+    "message": "Quân đó không thể đi từ {from} đến {to}."
+  },
+  "illegal_blocked": {
+    "message": "Đường đi bị chặn ở {blocker}."
+  },
+  "illegal_leaves_king_in_check": {
+    "message": "Nước đó khiến vua vẫn bị chiếu."
+  },
+  "illegal_castle_rights": {
+    "message": "Không còn quyền nhập thành hoặc thiếu xe cần thiết."
+  },
+  "illegal_castle_blocked": {
+    "message": "Đường nhập thành bị chặn ở {blocker}."
+  },
+  "illegal_castle_through_check": {
+    "message": "Vua không thể nhập thành khi đang bị chiếu, đi qua ô bị chiếu hoặc vào ô bị chiếu."
+  },
+  "illegal_en_passant_illegal": {
+    "message": "Không thể bắt tốt qua đường ở ô này."
+  },
+  "illegal_promotion_required": {
+    "message": "Tốt đến hàng cuối cần thêm ký hiệu phong cấp (q, r, b hoặc n)."
+  },
+  "illegal_promotion_illegal": {
+    "message": "Chỉ được phong cấp khi tốt đến hàng cuối."
+  },
+  "illegal_not_in_legal_set": {
+    "message": "Nước này không nằm trong các nước hợp lệ của thế cờ."
+  },
+  "badge_paused": {
+    "message": "Trợ thủ Cờ vua AI — đã tạm dừng"
+  },
+  "badge_pin": {
+    "message": "Trợ thủ Cờ vua AI — ghim một tab AI để chơi"
+  },
+  "badge_pinned": {
+    "message": "Trợ thủ Cờ vua AI — đã ghim vào {platform}"
+  },
+  "badge_check": {
+    "message": "Trợ thủ Cờ vua AI — {color} đang bị chiếu"
+  },
+  "badge_white": {
+    "message": "Trợ thủ Cờ vua AI — đến lượt Trắng"
+  },
+  "badge_black": {
+    "message": "Trợ thủ Cờ vua AI — đến lượt Đen"
+  },
+  "status_timeoutCopied": {
+    "message": "AI vẫn đang trả lời. Đã sao chép lời nhắc; chưa gửi gì."
+  },
+  "meta_turn": {
+    "message": "Lượt"
+  },
+  "meta_opponent": {
+    "message": "Đối thủ"
+  },
+  "status_turn": {
+    "message": "Lượt {color}"
+  },
+  "status_awaitingUnpinned": {
+    "message": "Đến lượt {color}, nhưng chưa ghim tab AI. Hãy ghim một tab được hỗ trợ để tiếp tục."
+  },
+  "status_newGameGoodLuck": {
+    "message": "Ván mới. Chúc bạn may mắn!"
+  },
+  "status_gameRestored": {
+    "message": "Đã khôi phục ván cờ."
+  },
+  "status_positionSet": {
+    "message": "Đã đặt thế cờ từ FEN."
+  },
+  "status_gameResetUndo": {
+    "message": "Đã đặt lại ván — Hoàn tác"
+  },
+  "outcome_checkmateWin": {
+    "message": "Chiếu hết — bạn thắng khi chơi {color}! {result}"
+  },
+  "outcome_checkmateLose": {
+    "message": "Chiếu hết — AI thắng. {result}"
+  },
+  "outcome_stalemate": {
+    "message": "Hòa do hết nước đi hợp lệ. {result}"
+  },
+  "outcome_fiftyMove": {
+    "message": "Hòa theo luật 50 nước. {result}"
+  },
+  "outcome_insufficientMaterial": {
+    "message": "Hòa — không đủ quân để chiếu hết. {result}"
+  },
+  "outcome_threefold": {
+    "message": "Hòa do lặp lại thế cờ ba lần. {result}"
+  },
+  "controls_pasteFen": {
+    "message": "Dán FEN"
+  },
+  "controls_copyPosition": {
+    "message": "Sao chép thế cờ"
+  },
+  "library_exportAll": {
+    "message": "Xuất tất cả"
+  },
+  "library_renameGame": {
+    "message": "Đổi tên ván cờ"
+  },
+  "analysis_stopEngine": {
+    "message": "Dừng"
+  },
+  "analysis_evalHeuristic": {
+    "message": "Đánh giá: {score} (heuristic)"
+  },
+  "analysis_moveAnnouncement": {
+    "message": "{color} đi {san}, {uci}"
+  },
+  "diagnostics_showDetails": {
+    "message": "Hiện chi tiết"
+  },
+  "diagnostics_hideDetails": {
+    "message": "Ẩn chi tiết"
+  },
+  "fen_setup": {
+    "message": "Thiết lập thế cờ (FEN)"
+  },
+  "fen_apply": {
+    "message": "Áp dụng"
+  },
+  "match_saving": {
+    "message": "Đang lưu ván xếp hạng đã kết thúc…"
+  },
+  "illegal_repeated_move": {
+    "message": "Nước này đã bị từ chối ở thế cờ hiện tại; hãy chọn nước hợp lệ khác."
   }
 }

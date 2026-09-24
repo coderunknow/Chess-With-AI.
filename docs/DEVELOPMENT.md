@@ -6,7 +6,7 @@
 git clone https://github.com/coderunknow/Chess-With-AI.git
 cd Chess-With-AI
 npm ci                # dev-only dependencies: eslint, prettier
-npm run verify        # manifest check + lint + format check + 140+ tests
+npm run verify        # manifest check + lint + format check + node:test suites
 ```
 
 Then load the extension:
@@ -14,7 +14,7 @@ Then load the extension:
 1. `chrome://extensions/` → enable **Developer mode**
 2. **Load unpacked** → select the repository folder
 3. Open `https://chatgpt.com` (or any supported host), click the extension icon
-4. Play a move and watch the prompt appear in the chat
+4. Open **AI chat connections**, pin that tab, then play a move and watch the one-shot prompt
 
 There is no build step and no bundler. Editing a file and clicking **Reload** on the extension card is the whole
 loop. The side panel re-reads its own files when it is reopened; the content script needs the AI tab reloaded too.
@@ -39,12 +39,14 @@ loop. The side panel re-reads its own files when it is reopened; the content scr
 
 - **`fake-dom.js`** — elements with the small surface the UI actually uses (class list, dataset, listeners,
   `closest()` for `data-*` lookups, replaceable clipboard).
-- **`fake-chrome.js`** — records every `tabs.sendMessage`, scripts the active tab, and implements
-  `chrome.storage.local` in memory.
+- **`fake-chrome.js`** — records every `tabs.sendMessage`, scripts a pinned tab plus focus changes, and implements
+  `chrome.storage.local`/`chrome.storage.session` in memory.
 
 `test/app-flow.test.js` boots the real `App` against those doubles, so the turn/retry/undo/persistence rules are
-covered without launching Chrome. The only thing they cannot cover is a real site's DOM — that is what the manual
-checklist below is for.
+covered without launching Chrome. `test/stockfish-binary.test.js` also boots the **real packaged JS/WASM bytes** under
+Node, checks their source and GPL digests and plays a legal limited-strength move (the browser-worker UCI controller
+is covered by a separate mocked-worker test). The only thing these cannot cover is a real site's DOM — that is what
+the manual checklist below is for.
 
 ## Debugging
 
@@ -64,22 +66,23 @@ __AI_CHESS_COMPANION__.app.session.history;
 
 ## Manual test checklist
 
-Run this before a release (it is the part automation cannot reach):
+Browser automation cannot certify the live DOM of a hosted AI chat. Run this on **each of the six** platforms before store submission (Gemini, ChatGPT, Claude, Grok, Perplexity, Copilot):
 
-- [ ] Panel opens from the toolbar icon; the badge shows `AI` only on supported hosts
-- [ ] A human move produces a prompt in the chat and auto-submits
-- [ ] The AI's `[e7e5]` reply moves the black piece; the turn indicator returns to you
-- [ ] An illegal AI reply triggers a retry prompt (and stops after the configured attempts)
-- [ ] Promotion opens the chooser and plays the chosen piece
-- [ ] Undo removes the pair; New game resets; Flip mirrors the board
-- [ ] `Copy PGN` puts a valid PGN on the clipboard; `PGN…` can load it back
-- [ ] Settings: switching to Black starts a new game and flips the board
-- [ ] Reloading the panel restores the running game
-- [ ] Checked on at least two hosts (ChatGPT + Gemini recommended)
+- [ ] Pin one open supported tab. Check its platform/host/title in the picker and opponent line. Switch window focus: the next prompt still goes to the pinned tab, not the focused tab. Close or navigate the pin off-host: status explains that it was cleared, with no silent retarget.
+- [ ] Wait while the site shows **Stop** or streams a reply. Send a chess move: the panel shows generation-wait status, never clicks Stop/presses Enter early, then sends exactly **one** complete prompt when ready. Test a slow or ambiguous send with Copy prompt fallback; a click must never be followed by Enter.
+- [ ] Select Manual send, play a move: prompt is copied/offered, but the composer remains untouched. Paste/send it yourself; only the **new** assistant message can move the board.
+- [ ] Submit an illegal AI move (pin, castling through check or missing promotion). Confirm the localized reason and a bounded `e2-e4` legal list in the correction. At max retries, status shows **Ask again** and no engine substitute plays.
+- [ ] Click **Play Black / Play White** with a game in progress: confirm starts a new game and Black flips the board. Flip, tap-once, drag-and-drop, keyboard focus and no page jump from the move list still work at widths 280–900px.
+- [ ] Pause: badge **OFF**, no prompts/observer/worker. Close/reopen the panel and/or restart the service worker: still paused. Resume: no old reply is re-emitted; request a new move intentionally.
+- [ ] Turn on sound and vary volume: wood move/capture/check/castle/promotion/game-over sounds. Toggle animations and OS reduced motion: glide/fade or instant, respectively.
+- [ ] Enable rated match with Auto mode/live pin: confirm a new game, UCI handshake shows its range, Stockfish plays only its side and the chat supplies only its side. Finish an actual game: n/W–D–L, estimate, 95% interval and **Stockfish UCI_Elo scale, not FIDE** appear. Stop a second game: no additional rated result. Test manual mode/no pin/WASM failure: controls refuse to start, show an error and do not fabricate a rating.
+- [ ] PGN import/export, snapshot restore and library remain independent of match records; export match PGNs.
+
+Automated tests cover six-host Stop detection, full-string composer verification, provenance, perft, pin/pause, estimator math and a complete rated Fool's Mate through a stubbed content bridge and worker. They do **not** claim that a live AI model achieved a scripted result.
 
 ## Adding an AI platform
 
-1. Add an entry to `PLATFORMS` in `src/shared/platforms.js` (`id`, `name`, `hosts`, `input`, `send`, `assistant`, `user`).
+1. Add an entry to `PLATFORMS` in `src/shared/platforms.js` (`id`, `name`, `hosts`, `input`, `send`, `stopCandidates`, `assistant`, `user`).
 2. Run `npm run sync:manifest` — this updates `host_permissions`, `content_scripts.matches` and
    `web_accessible_resources.matches` for you.
 3. Run `npm run verify`.
@@ -90,7 +93,8 @@ Selector guidance per site:
 | Need        | Look for                                                                                                               |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Composer    | the `textarea`/`contenteditable` the site focuses when you click the message box; prefer a stable `id` or `aria-label` |
-| Send button | `data-testid`, `aria-label` containing "send"/"submit"; avoid index-based selectors                                    |
+| Send button | accessible name/title/test ID containing send/submit; never match a Stop control or rely on a class hash               |
+| Stop state  | accessible stop/cancel/interrupt/dừng names and site streaming markers; verify the request waits without clicking      |
 | AI replies  | the per-message wrapper (`article`, `[data-message-author-role]`); generic fallbacks already cover `article`/`.prose`  |
 
 If a site's composer is not detected, run `bridge.findInput()` in the page console — the bridge logs the selectors
@@ -123,13 +127,14 @@ Two workflows live in `.github/workflows/`:
 2. Run `npm run sync:manifest` — it copies the version into `manifest.json`.
 3. Add a `CHANGELOG.md` entry.
 4. `npm run verify && npm run package` locally, and capture the output for the pull request.
-5. Merge to `main`, then tag and push: `git tag -a v<version> -m "<version>" && git push origin v<version>`.
+5. Open a PR, wait for all CI checks, then merge into `main` without overrides. Tag **the merge commit** (not the feature branch): `git tag -a v<version> -m "v<version>" <merge-commit>`; push the tag only after verifying it points to the main merge commit.
 6. Let the `Release` workflow attach the archive, and confirm the release page lists
    `ai-chess-companion-<version>.zip` before announcing it.
 7. Upload the same archive to the Chrome Web Store developer dashboard.
 
 ## Dependencies policy
 
-Runtime dependencies stay at **zero**. Dev dependencies are limited to linting/formatting. If you need a real
-library at runtime, open an issue first and document the trade-off in `docs/ARCHITECTURE.md` — the zero-build
-promise (clone → load unpacked → play) is a feature, not an accident.
+Runtime npm dependencies stay at **zero**. Dev dependencies are limited to linting/formatting. The separately
+licensed `engine/stockfish/` JS/WASM pair is vendored, not an npm dependency or a runtime download. Its GPL-3
+license and exact upstream source reference must accompany every packaged archive. The zero-build promise
+(clone → load unpacked → play) is a feature, not an accident.

@@ -69,12 +69,13 @@ test("an empty board renders no pieces", () => {
 test("selection, targets, last move and check are flagged", () => {
   const session = new GameSession();
   session.playHumanMove("e2e4");
+  session.playAiMove("a7a6"); // White owns the turn again; no out-of-turn targets.
 
   const description = describeBoard({
     position: session.position,
     selected: parseSquare("e4"),
     targets: session.legalTargets(parseSquare("e4")),
-    lastMove: squaresOfUci(session.lastMove.uci),
+    lastMove: squaresOfUci("e2e4"), // selection and highlighting are independent overlays
   });
   const cells = new Map(description.cells.map((cell) => [cell.name, cell]));
 

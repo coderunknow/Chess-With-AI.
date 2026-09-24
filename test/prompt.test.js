@@ -52,12 +52,12 @@ test("retry prompts quote the illegal move and restate the position", () => {
   const prompt = buildRetryPrompt({ fen: "8/8/8/8/8/8/8/K6k w - - 0 1", uci: "e7e5", aiColor: "b" });
   assert.match(prompt, /\[e7e5\] is not legal/);
   assert.match(prompt, /Position \(FEN\)/);
-  assert.match(prompt, /exactly one legal move/);
+  assert.match(prompt, /exactly one bracketed coordinate move/);
 });
 
-test("bracketed moves are extracted newest first, without duplicates", () => {
+test("bracketed moves are extracted first occurrence first, without duplicates", () => {
   const reply = "I played [e7e5] first, but [g8f6] is better. Final: [g8f6].";
-  assert.deepEqual(extractBracketedMoves(reply), ["g8f6", "e7e5"]);
+  assert.deepEqual(extractBracketedMoves(reply), ["e7e5", "g8f6"]);
   assert.deepEqual(extractBracketedMoves("no moves here"), []);
   assert.deepEqual(extractBracketedMoves("[E2E4]"), ["e2e4"], "case is normalised");
   assert.deepEqual(extractBracketedMoves("[e7e8Q]"), ["e7e8q"]);
@@ -127,4 +127,51 @@ test("runtime messages are recognised and responses normalised", () => {
   assert.deepEqual(normaliseResponse({ ok: false, error: "boom" }), { ok: false, error: "boom" });
   assert.equal(normaliseResponse(undefined).ok, false);
   assert.equal(normaliseResponse({ ok: false }).error, "The request failed.");
+});
+
+test("retry correction includes reason, hyphenated legal set, history and rejected moves", () => {
+  const prompt = buildRetryPrompt({
+    fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    uci: "a1a5",
+    aiColor: "w",
+    history: "1. e4 e5",
+    reason: { code: "blocked", facts: { from: "a1", to: "a5", blocker: "a2" } },
+    legalMoves: ["e2e4", "g1f3", "a2a4"],
+    rejectedMoves: ["a1a5", "b1b5"],
+  });
+  assert.match(prompt, /The move \[a1a5\] is not legal/);
+  assert.match(prompt, /path is blocked at a2/);
+  assert.match(prompt, /Position \(FEN\):/);
+  assert.match(prompt, /Side to move: WHITE/);
+  assert.match(prompt, /Moves so far: 1\. e4 e5/);
+  assert.match(prompt, /Legal moves \(3 total\): e2-e4 g1-f3 a2-a4/);
+  assert.ok(!prompt.includes("[e2e4]"));
+  assert.match(prompt, /a1-a5, b1-b5/);
+  assert.match(prompt, /Put the bracketed move first\. No second bracketed move/);
+  assert.ok(isEchoOfPrompt(prompt, prompt));
+  assert.deepEqual(extractMoveCandidates(prompt), [], "a retry prompt echo is never a played move");
+});
+
+test("long legal move lists retain their reason and count, and state truncation within 4000 chars", () => {
+  const moves = Array.from({ length: 700 }, (_, index) => (index % 2 ? "e2e4" : "g1f3"));
+  const prompt = buildRetryPrompt({
+    fen: "8/8/8/8/8/8/8/K6k w - - 0 1",
+    uci: "a1a5",
+    aiColor: "w",
+    history: "1. e4 ".repeat(500),
+    reason: { code: "blocked", facts: { blocker: "a2" } },
+    legalMoves: moves,
+    rejectedMoves: ["a1a5"],
+  });
+  assert.ok(prompt.length <= MAX_PROMPT_LENGTH);
+  assert.match(prompt, /blocked at a2/);
+  assert.match(prompt, /Legal moves \(700 total\)/);
+  assert.match(prompt, /list truncated/);
+});
+
+test("first bracketed UCI wins; bare fallback is disabled for quoted legal lists", () => {
+  assert.deepEqual(extractMoveCandidates("[e2e4] [d2d4]"), ["e2e4", "d2d4"]);
+  assert.deepEqual(extractMoveCandidates("Legal moves (2 total): e2e4 d2d4"), []);
+  assert.deepEqual(extractMoveCandidates("The move [e2e4] is not legal. Reply [d2d4]."), []);
+  assert.deepEqual(extractMoveCandidates("I play e2e4"), ["e2e4"]);
 });

@@ -176,7 +176,7 @@ html {
 
 body {
   margin: 0;
-  min-width: 280px;
+  min-width: 0;
   max-width: 100vw;
   overflow-x: hidden;
   background: var(--bg);
@@ -1036,4 +1036,121 @@ body[data-theme="light"] .status[data-kind="error"] {
 .diagnostics::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 3px;
+}
+
+/* v0.5: a compact picker inside the existing connections section. */
+.row {
+  flex-wrap: wrap;
+}
+
+.pin-status {
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-small);
+  background: var(--panel-raised);
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tab-list {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.tab-row {
+  display: grid;
+  width: 100%;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.tab-row:hover,
+.tab-row:focus-visible,
+.tab-row.is-pinned {
+  border-color: var(--accent);
+}
+
+.tab-row.is-pinned {
+  background: var(--panel);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.tab-title {
+  font-weight: 700;
+}
+
+.tab-host {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.settings-group {
+  min-width: 0;
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.settings-group legend {
+  padding: 0 5px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.settings-group .checkbox {
+  margin: 6px 0;
+}
+
+.settings-group .field > .select,
+.settings-group .field > input[type="range"] {
+  width: 45%;
+  flex-shrink: 0;
+}
+
+.match-summary {
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  overflow-wrap: anywhere;
+}
+
+.match-summary h3,
+.match-summary p {
+  margin: 0 0 4px;
+}
+
+@media (max-width: 340px) {
+  .settings-group .field {
+    flex-wrap: wrap;
+  }
+
+  .settings-group .field > .select,
+  .settings-group .field > input[type="range"] {
+    width: 100%;
+  }
+}
+
+.piece-flight {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 7;
+  font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", serif;
+  font-size: clamp(18px, 8vw, 42px);
+  line-height: 1;
+  will-change: transform, opacity;
 }

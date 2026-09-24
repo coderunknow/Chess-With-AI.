@@ -12,6 +12,7 @@
  */
 
 import { Color } from "../core/pieces.js";
+import { DEFAULT_TIME_MS } from "./clock.js";
 
 /** Storage key for the settings record. */
 export const SETTINGS_KEY = "settings";
@@ -55,6 +56,14 @@ export const PROMPT_STYLES = Object.freeze({
  * @property {boolean} clockEnabled show clocks (off by default).
  * @property {boolean} animationsEnabled animate moves (respects prefers-reduced-motion).
  * @property {boolean} evalBarEnabled show evaluation bar.
+ * @property {number} engineLevel local heuristic strength 1–8 (never an Elo).
+ * @property {number} soundVolume WebAudio volume 0–1.
+ * @property {number} clockDurationMs initial time on each clock.
+ * @property {'auto'|'manual'} sendMode one-shot automatic send or copy/paste.
+ * @property {number} generationWaitMs wait for Stop to disappear (ms).
+ * @property {boolean} paused soft pause, persisted across service-worker restarts.
+ * @property {number} matchAnchorElo requested Stockfish UCI_Elo; clamped again to the binary range.
+ * @property {number} matchMoveTimeMs Stockfish go movetime, 100–5000ms.
  */
 
 /** @type {Readonly<Settings>} */
@@ -75,10 +84,23 @@ export const DEFAULT_SETTINGS = Object.freeze({
   clockEnabled: false,
   animationsEnabled: true,
   evalBarEnabled: false,
+  engineLevel: 4,
+  soundVolume: 0.4,
+  clockDurationMs: DEFAULT_TIME_MS,
+  sendMode: "auto",
+  generationWaitMs: 120000,
+  paused: false,
+  matchAnchorElo: 1500,
+  matchMoveTimeMs: 500,
 });
 
 /** Bounds for {@link Settings.maxRetries}. */
 export const MAX_RETRIES_LIMIT = 5;
+
+function boundedNumber(value, fallback, min, max, integer = true) {
+  const num = Number(value);
+  return Number.isFinite(num) ? Math.max(min, Math.min(max, integer ? Math.round(num) : num)) : fallback;
+}
 
 /**
  * @param {unknown} value
@@ -135,6 +157,14 @@ export function normaliseSettings(input) {
     clockEnabled: asBoolean(source.clockEnabled, DEFAULT_SETTINGS.clockEnabled),
     animationsEnabled: asBoolean(source.animationsEnabled, DEFAULT_SETTINGS.animationsEnabled),
     evalBarEnabled: asBoolean(source.evalBarEnabled, DEFAULT_SETTINGS.evalBarEnabled),
+    engineLevel: boundedNumber(source.engineLevel, DEFAULT_SETTINGS.engineLevel, 1, 8),
+    soundVolume: boundedNumber(source.soundVolume, DEFAULT_SETTINGS.soundVolume, 0, 1, false),
+    clockDurationMs: boundedNumber(source.clockDurationMs, DEFAULT_SETTINGS.clockDurationMs, 60000, 3600000),
+    sendMode: asEnum(source.sendMode, ["auto", "manual"], DEFAULT_SETTINGS.sendMode),
+    generationWaitMs: boundedNumber(source.generationWaitMs, DEFAULT_SETTINGS.generationWaitMs, 5000, 180000),
+    paused: asBoolean(source.paused, DEFAULT_SETTINGS.paused),
+    matchAnchorElo: boundedNumber(source.matchAnchorElo, DEFAULT_SETTINGS.matchAnchorElo, 0, 5000),
+    matchMoveTimeMs: boundedNumber(source.matchMoveTimeMs, DEFAULT_SETTINGS.matchMoveTimeMs, 100, 5000),
   };
 }
 

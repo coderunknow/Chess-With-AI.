@@ -24,6 +24,8 @@ import { toName } from "../core/squares.js";
 import { formatPgn, parsePgn, toSan } from "../core/pgn.js";
 import { formatMoveList } from "../shared/prompt.js";
 import { evaluate, classifyMove } from "../core/eval.js";
+import { explainIllegalMove, IllegalReason } from "../core/illegal-move.js";
+import { rankOf } from "../core/squares.js";
 
 /** Snapshot format version, bumped when the persisted shape changes. */
 export const SNAPSHOT_VERSION = 2;
@@ -69,6 +71,7 @@ export const MoveError = Object.freeze({
  * @property {string} error human-readable message.
  * @property {MoveEntry} [entry] the move that was applied.
  * @property {import('../core/position.js').Outcome} [outcome]
+ * @property {{code:string, facts:Record<string,string>}} [reason] explanation on ILLEGAL.
  */
 
 export class GameSession {
@@ -424,8 +427,8 @@ export class GameSession {
   /** @returns {string} the move list rendered as `1. e4 e5 2. Nf3`. */
   get moveListText() {
     return formatMoveList(this.#history, {
-      startMoveNumber: Number.parseInt(this.#initialFen.split(/\\s+/)[5] || "1", 10) || 1,
-      blackToMoveFirst: (this.#initialFen.split(/\\s+/)[1] || "w") === "b",
+      startMoveNumber: Number.parseInt(this.#initialFen.split(/\s+/)[5] || "1", 10) || 1,
+      blackToMoveFirst: (this.#initialFen.split(/\s+/)[1] || "w") === "b",
     });
   }
 
@@ -713,12 +716,31 @@ export class GameSession {
   #play(uci, source) {
     const parsed = parseUci(uci);
     if (!parsed) {
-      return failure(MoveError.ILLEGAL, `"${String(uci)}" is not a valid move.`);
+      return failure(
+        MoveError.ILLEGAL,
+        `"${String(uci)}" is not a valid move.`,
+        explainIllegalMove(this.#position, uci),
+      );
     }
 
-    const move = this.#position.moveFromUci(uci);
+    // Position.moveFromUci deliberately defaults an omitted promotion to a
+    // queen for human/PGN convenience. The chat protocol requires the suffix.
+    const piece = this.#position.pieceAt(parsed.from);
+    const missingPromotion =
+      source === MoveSource.AI &&
+      piece?.toLowerCase() === "p" &&
+      rankOf(parsed.to) === (this.#position.turn === "w" ? 7 : 0) &&
+      !parsed.promotion;
+    const move = missingPromotion ? null : this.#position.moveFromUci(uci);
     if (!move) {
-      return failure(MoveError.ILLEGAL, `[${parsed.from}${parsed.to}] is not legal in this position.`);
+      const reason = explainIllegalMove(this.#position, uci);
+      return failure(
+        MoveError.ILLEGAL,
+        reason.code === IllegalReason.PROMOTION_REQUIRED
+          ? "A promotion piece is required."
+          : `[${uci}] is not legal in this position.`,
+        reason,
+      );
     }
 
     const san = toSan(this.#position, move);
@@ -727,6 +749,8 @@ export class GameSession {
     this.#waitingForAi = source === MoveSource.HUMAN && this.#position.turn !== this.#playerColor;
     if (source === MoveSource.AI) {
       this.#retryCount = 0;
+    } else if (source === MoveSource.HUMAN) {
+      this.#rejectedMoves.clear(); // a new ply must never inherit an old rejection
     }
     return { ok: true, code: "", error: "", entry, outcome: this.#position.outcome() };
   }
@@ -772,6 +796,6 @@ export class GameSession {
  * @param {string} error
  * @returns {MoveResult}
  */
-function failure(code, error) {
-  return { ok: false, code, error };
+function failure(code, error, reason = undefined) {
+  return { ok: false, code, error, ...(reason ? { reason } : {}) };
 }

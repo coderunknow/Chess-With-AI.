@@ -209,3 +209,27 @@ test("theme-init.js exists and is CSP-safe", async () => {
   assert.ok(!/innerHTML/.test(themeInit), "theme-init.js must not use innerHTML");
   assert.ok(!/fetch\s*\(/.test(themeInit), "theme-init.js must not use fetch");
 });
+
+test("the packaged Stockfish component has its GPL and only local WASM CSP", async () => {
+  const manifest = JSON.parse(await read("manifest.json"));
+  assert.deepEqual(manifest.permissions, ["sidePanel", "storage", "scripting"]);
+  assert.equal(
+    manifest.content_security_policy.extension_pages,
+    "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+  );
+  const glue = await read("src/ui/stockfish.js");
+  const upstream = await read("engine/stockfish/stockfish-17.1-lite-single-03e3232.js");
+  const license = await read("engine/stockfish/COPYING-GPL-3.0.txt");
+  const source = await read("engine/stockfish/SOURCE.md");
+  const packager = await read("scripts/package.mjs");
+  assert.match(glue, /chrome\.runtime\.getURL/);
+  assert.match(upstream, /Stockfish\.js 17\.1/);
+  assert.ok(
+    !/\bnew Function\b|\beval\s*\(/.test(upstream),
+    "the vendored classic worker must not generate scripts from text",
+  );
+  assert.match(license, /GNU GENERAL PUBLIC LICENSE/);
+  assert.match(source, /github\.com\/nmrugg\/stockfish\.js\/tree\/f9512ef9aff391026813a56855dd086cb72a2d58/);
+  assert.match(source, /stockfish\.js-v17\.1\.0-lite-single-source\.tar\.gz/);
+  assert.match(packager, /engine\/stockfish/);
+});

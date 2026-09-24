@@ -23,6 +23,16 @@ export const MessageType = Object.freeze({
   CONTENT_STATUS: "CONTENT_STATUS",
   /** Liveness probe used by the side panel before injecting the script. */
   PING: "PING",
+  /** Background -> panel: supported tab picker, pin and pin-loss events. */
+  GET_CONNECTIONS: "GET_CONNECTIONS",
+  PIN_TAB: "PIN_TAB",
+  UNPIN_TAB: "UNPIN_TAB",
+  PIN_CHANGED: "PIN_CHANGED",
+  /** Side panel -> content: stop observing but keep the content script injected. */
+  SET_PAUSED: "SET_PAUSED",
+  PAUSE_CHANGED: "PAUSE_CHANGED",
+  CANCEL_REPLY: "CANCEL_REPLY",
+  GET_DIAGNOSTICS: "GET_DIAGNOSTICS",
 });
 
 /** Longest prompt the extension will type into a chat box. */

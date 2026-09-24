@@ -397,7 +397,9 @@ export function createFakeDocument(elementsById = {}) {
 
   const document = {
     body,
+    title: "Chess chat",
     registry,
+    addEventListener: () => undefined,
     createElement: (tagName, options = {}) => {
       const lower = tagName.toLowerCase();
       const element =
@@ -473,6 +475,7 @@ export function installFakeDom({ elementsById = {} } = {}) {
     location: { hostname: "chatgpt.com", href: "https://chatgpt.com/" },
     getComputedStyle: (element) => element.getComputedStyle(),
     getSelection: () => null,
+    addEventListener: () => undefined,
   });
   globalThis.getComputedStyle = (element) => element.getComputedStyle();
   globalThis.MutationObserver = FakeMutationObserver;

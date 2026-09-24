@@ -23,7 +23,8 @@
  * @property {SelectorAttempt[]} composerAttempts
  * @property {SelectorAttempt[]} sendAttempts
  * @property {SelectorAttempt[]} assistantAttempts
- * @property {{findInput:number, type:number, submit:number, total:number}} timings
+ * @property {{findInput:number, type:number, submit:number, total:number, generationWait:number}} timings
+ * @property {{stopControlSeen:boolean, secondEventSuppressed:boolean, fullStringEquality:boolean}} verification
  * @property {string} lastError
  * @property {string} matchedComposer
  * @property {string} matchedSend
@@ -48,7 +49,8 @@ export function createEmptyReport({ platform = "", url = "" } = {}) {
     composerAttempts: [],
     sendAttempts: [],
     assistantAttempts: [],
-    timings: { findInput: 0, type: 0, submit: 0, total: 0 },
+    timings: { findInput: 0, type: 0, submit: 0, total: 0, generationWait: 0 },
+    verification: { stopControlSeen: false, secondEventSuppressed: false, fullStringEquality: false },
     lastError: "",
     matchedComposer: "",
     matchedSend: "",
@@ -77,7 +79,8 @@ export function formatReport(report) {
     `Typing method: ${report.typingMethod || "none"}`,
     `Submit method: ${report.submitMethod || "none"}`,
     ``,
-    `Timings (ms): findInput=${report.timings.findInput} type=${report.timings.type} submit=${report.timings.submit} total=${report.timings.total}`,
+    `Timings (ms): findInput=${report.timings.findInput} generationWait=${report.timings.generationWait} type=${report.timings.type} submit=${report.timings.submit} total=${report.timings.total}`,
+    `Stop seen: ${Boolean(report.verification?.stopControlSeen)}; submit: ${report.submitMethod || "none"}; second event suppressed: ${Boolean(report.verification?.secondEventSuppressed)}; full-string equality: ${Boolean(report.verification?.fullStringEquality)}`,
     ``,
   ];
 
@@ -145,6 +148,11 @@ export class DiagnosticsCollector {
   /** @param {Partial<DiagnosticsReport['timings']>} timings */
   setTimings(timings) {
     this.#report.timings = { ...this.#report.timings, ...timings };
+  }
+
+  /** @param {Partial<DiagnosticsReport['verification']>} fields */
+  setVerification(fields) {
+    this.#report.verification = { ...this.#report.verification, ...fields };
   }
 
   /** @param {string} error */

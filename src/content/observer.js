@@ -21,7 +21,15 @@
 
 import { extractMoveCandidates, isEchoOfPrompt } from "../shared/prompt.js";
 import { createLogger } from "../shared/log.js";
-import { isElement, isUserSideElement, normaliseReplyText, textOf } from "./dom.js";
+import {
+  collapseWhitespace,
+  isElement,
+  isUserSideElement,
+  newUserMessages,
+  normaliseReplyText,
+  textOf,
+  userMessageSnapshot,
+} from "./dom.js";
 
 const log = createLogger("observer");
 
@@ -76,11 +84,17 @@ export class MoveWatcher {
   #settleTimer = 0;
   #maxWaitTimer = 0;
   #stableTimer = 0;
-  #periodicTimer = 0;
   #lastTexts = new Map();
   /** @type {DiagnosticsCollector|null} */
   #diagnostics = null;
   #lastScanHadNoMove = false;
+  #known = new Set();
+  #submitted = false;
+  #manual = false;
+  #expectedPrompt = "";
+  #rejectedMoves = new Set();
+  #userBefore = new Set();
+  #userSelectors = [];
 
   /**
    * @param {object} options
@@ -90,6 +104,7 @@ export class MoveWatcher {
    * @param {number} [options.settleMs]
    * @param {number} [options.maxWaitMs]
    * @param {DiagnosticsCollector} [options.diagnostics]
+   * @param {string[]} [options.userSelectors]
    */
   constructor({
     onMove,
@@ -98,6 +113,7 @@ export class MoveWatcher {
     settleMs = SETTLE_MS,
     maxWaitMs = MAX_WAIT_MS,
     diagnostics = null,
+    userSelectors = [],
   }) {
     this.onMove = onMove;
     this.getAssistantSelectors = assistantSelectors;
@@ -105,6 +121,7 @@ export class MoveWatcher {
     this.settleMs = settleMs;
     this.maxWaitMs = maxWaitMs;
     this.#diagnostics = diagnostics;
+    this.#userSelectors = userSelectors;
   }
 
   /**
@@ -120,16 +137,8 @@ export class MoveWatcher {
     this.#observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     log.debug("watching for AI replies");
 
-    // Periodic scan while awaiting (handles virtualized lists)
-    this.#periodicTimer = window.setInterval(() => {
-      if (this.#pending.size > 0) {
-        this.#scan();
-      }
-    }, 5000);
-
-    // Initial scan of existing DOM
-    this.#scanExisting();
-
+    // Do not rescan history on start/resume; only containers new since the
+    // request baseline can produce an AI move. No polling interval is needed.
     return true;
   }
 
@@ -141,12 +150,42 @@ export class MoveWatcher {
     window.clearTimeout(this.#settleTimer);
     window.clearTimeout(this.#maxWaitTimer);
     window.clearTimeout(this.#stableTimer);
-    window.clearInterval(this.#periodicTimer);
     this.#settleTimer = 0;
     this.#maxWaitTimer = 0;
     this.#stableTimer = 0;
-    this.#periodicTimer = 0;
     this.#lastTexts.clear();
+    this.#submitted = false;
+    this.#expectedPrompt = "";
+    this.#manual = false;
+  }
+
+  /**
+   * Arms a single reply. Assistant containers already in the page at this
+   * point are not eligible, even if they later mutate or the watcher restarts.
+   * In manual mode the user's full prompt echo must appear before we arm the
+   * assistant side; copying a prompt alone is not proof that it was sent.
+   */
+  expectReply(prompt, { rejectedMoves = [], manual = false } = {}) {
+    this.stop();
+    this.rememberPrompt(prompt);
+    this.#expectedPrompt = prompt;
+    this.#rejectedMoves = new Set(rejectedMoves.map((uci) => String(uci).toLowerCase()));
+    this.#reported.clear();
+    this.#lastScanHadNoMove = false;
+    this.#manual = manual;
+    this.#userBefore = userMessageSnapshot(document, this.#userSelectors);
+    this.#known = this.#existingAssistantContainers();
+    this.start();
+  }
+
+  /** Called immediately before Auto submit, or at the full Manual user echo. */
+  markSubmitted({ preserveKnown = false } = {}) {
+    if (this.#submitted || !this.#expectedPrompt) return;
+    this.#submitted = true;
+    // Auto: snapshot immediately BEFORE the click. Manual: the mutation batch
+    // may already include the echo AND a fast assistant response. Rebasing to
+    // the current DOM then would incorrectly classify that reply as history.
+    if (!preserveKnown) this.#known = this.#existingAssistantContainers();
   }
 
   /**
@@ -164,43 +203,66 @@ export class MoveWatcher {
     }
   }
 
-  #scanExisting() {
-    try {
-      const selectors = this.getAssistantCandidates
-        ? this.getAssistantCandidates().map((c) => c.selector)
-        : this.getAssistantSelectors();
-      const all = [...selectors, ...FALLBACK_CONTAINER_SELECTORS];
-      for (const selector of all) {
-        try {
-          const elements = document.querySelectorAll(selector);
-          for (const el of elements) {
-            if (!isUserSideElement(el)) {
-              this.#pending.add(el);
-            }
-          }
-        } catch {
-          // ignore invalid
+  #existingAssistantContainers() {
+    const known = new Set();
+    const selectors = this.getAssistantCandidates
+      ? this.getAssistantCandidates().map((c) => c.selector)
+      : this.getAssistantSelectors();
+    for (const selector of [...selectors, ...FALLBACK_CONTAINER_SELECTORS]) {
+      try {
+        for (const element of document.querySelectorAll(selector)) {
+          if (!isUserSideElement(element)) known.add(element);
         }
+      } catch {
+        // Site selector changed; never broaden this to the entire transcript.
       }
-    } catch {
-      // ignore
     }
+    return known;
   }
 
   /**
    * @param {MutationRecord[]} records
    */
   #onMutations(records) {
-    for (const record of records) {
-      this.#nominate(record.target);
-      for (const node of record.addedNodes) {
-        this.#nominate(node);
+    if (this.#manual && !this.#submitted) {
+      const messages = newUserMessages(document, this.#userSelectors, this.#userBefore, this.#expectedPrompt);
+      const echo =
+        messages.length === 1 && collapseWhitespace(textOf(messages[0])) === collapseWhitespace(this.#expectedPrompt)
+          ? messages[0]
+          : null;
+      // Mutation records are chronological. An assistant that appears BEFORE
+      // the user has pasted and sent the full prompt must become history, not
+      // an eligible reply. If echo and assistant arrive in the same batch,
+      // only nodes after the echo are nominated. No DOM-wide rebase here.
+      for (const record of records) {
+        const added = [...record.addedNodes];
+        for (const node of [record.target, ...added]) {
+          if (
+            !this.#submitted &&
+            echo &&
+            (node === echo || echo.contains(node) || (added.includes(node) && node.contains?.(echo)))
+          ) {
+            this.markSubmitted({ preserveKnown: true });
+            continue;
+          }
+          if (this.#submitted) this.#nominate(node);
+          else this.#rememberAssistant(node);
+        }
+      }
+    } else if (this.#submitted) {
+      for (const record of records) {
+        this.#nominate(record.target);
+        for (const node of record.addedNodes) this.#nominate(node);
       }
     }
-    if (this.#pending.size === 0) {
-      return;
-    }
-    this.#schedule();
+    if (this.#pending.size) this.#schedule();
+  }
+
+  #rememberAssistant(node) {
+    const element = isElement(node) ? node : node.parentElement;
+    if (!isElement(element) || isUserSideElement(element)) return;
+    const container = this.#resolveContainer(element);
+    if (container) this.#known.add(container);
   }
 
   /**
@@ -215,7 +277,7 @@ export class MoveWatcher {
     }
 
     const container = this.#resolveContainer(element);
-    if (!container) {
+    if (!container || this.#known.has(container)) {
       return;
     }
 
@@ -323,7 +385,18 @@ export class MoveWatcher {
         continue;
       }
 
+      if (/\b(?:I resign|I concede|I forfeit)\b|^resign[.!]?$/i.test(normalized.trim())) {
+        this.onMove({ text: normalized.slice(0, 400), resigned: true });
+        return;
+      }
+
       const candidates = extractMoveCandidates(normalized);
+      // The first bracketed move is the assistant's answer. Do not skip an
+      // already rejected answer to play a later example from its explanation.
+      if (candidates.length > 0 && this.#rejectedMoves.has(candidates[0])) {
+        this.onMove({ move: candidates[0], text: normalized.slice(0, 400), noMove: true, repeated: true });
+        return;
+      }
       if (candidates.length === 0) {
         // Keep track of longest no-move text that looks like a plan reply
         if (normalized.length > 50 && normalized.length < 20000) {

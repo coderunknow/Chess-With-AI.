@@ -281,6 +281,8 @@ export class Position {
    */
   legalMovesFrom(square) {
     const mover = this.#turn;
+    const piece = this.#board[square];
+    if (!piece || piece !== pieceOf(mover, piece.toLowerCase())) return [];
     return this.#generateMoves(square).filter((move) => {
       const undo = this.#apply(move);
       const legal = !this.isCheck(mover);

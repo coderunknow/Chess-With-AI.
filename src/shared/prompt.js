@@ -8,7 +8,8 @@
  * @module shared/prompt
  */
 
-import { MAX_SCANNED_TEXT_LENGTH } from "./messaging.js";
+import { MAX_PROMPT_LENGTH, MAX_SCANNED_TEXT_LENGTH } from "./messaging.js";
+import { illegalReasonSentence } from "../core/illegal-move.js";
 
 /** Bracketed UCI move, e.g. `[g8f6]` or `[e7e8q]`. */
 export const AI_MOVE_PATTERN = /\[([a-h][1-8][a-h][1-8][qrbn]?)\]/gi;
@@ -33,7 +34,7 @@ export function normaliseUci(value) {
 }
 
 /**
- * Extracts every bracketed move from `text`, newest first.
+ * Extracts every bracketed move from `text`, first occurrence first.
  *
  * @param {unknown} text
  * @returns {string[]} unique, normalised UCI moves.
@@ -46,17 +47,19 @@ export function extractBracketedMoves(text) {
  * Extracts bracketed moves and, when none are present, bare UCI tokens.
  *
  * @param {unknown} text
- * @returns {string[]} unique, normalised UCI moves, newest first.
+ * @returns {string[]} unique, normalised UCI moves, first occurrence first.
  */
 export function extractMoveCandidates(text) {
+  if (typeof text !== "string" || isPromptShaped(text)) return [];
   const bracketed = extractBracketedMoves(text);
+  // A quoted legal-move list is not an AI answer, even if it has a bare UCI.
   return bracketed.length > 0 ? bracketed : extract(text, BARE_MOVE_PATTERN);
 }
 
 /**
  * @param {unknown} text
  * @param {RegExp} pattern must be global.
- * @returns {string[]} unique matches, newest first.
+ * @returns {string[]} unique matches, first occurrence first.
  */
 function extract(text, pattern) {
   if (typeof text !== "string" || text.length === 0 || text.length > MAX_SCANNED_TEXT_LENGTH) {
@@ -75,7 +78,7 @@ function extract(text, pattern) {
     }
     match = matcher.exec(text);
   }
-  return matches.reverse();
+  return matches;
 }
 
 /**
@@ -148,19 +151,59 @@ export function buildOpeningPrompt({ aiColor, fen }) {
  * @param {string} input.uci the illegal move the AI produced.
  * @param {'w'|'b'} input.aiColor
  * @param {string} [input.history]
- * @returns {string} the prompt text.
+ * @param {{code:string, facts:Record<string,string>}} [input.reason]
+ * @param {string[]} [input.legalMoves] obtained from Position.legalMoves(), never parsed from AI text.
+ * @param {string[]} [input.rejectedMoves] moves rejected on this ply.
+ * @returns {string} a bounded correction, never a second initial request.
  */
-export function buildRetryPrompt({ fen, uci, aiColor, history = "" }) {
+export function buildRetryPrompt({
+  fen,
+  uci,
+  aiColor,
+  history = "",
+  reason = { code: "not-in-legal-set", facts: {} },
+  legalMoves = [],
+  rejectedMoves = [uci],
+}) {
   const sideName = aiColor === "w" ? "WHITE" : "BLACK";
-  const lines = [`The move [${uci}] is not legal in this position.`, `Position (FEN): ${fen}`];
-  if (history) {
-    lines.push(`Moves so far: ${history}`);
-  }
-  lines.push(
+  // All bracketed examples in a request are echoes, never reply candidates.
+  // Never include bare UCI in the legal list: e2-e4 breaks the UCI regex.
+  const suffix = [
+    `Previously rejected UCIs (do not repeat): ${rejectedMoves.map(hyphenated).join(", ") || "none"}.`,
     `Play a legal move for ${sideName} now.`,
-    "Answer with exactly one legal move inside square brackets, for example [g8f6].",
-  );
-  return lines.join("\n");
+    "Reply with exactly one bracketed coordinate move. Put the bracketed move first. No second bracketed move.",
+  ].join("\n");
+  const head = [
+    `The move [${uci}] is not legal in this position. ${illegalReasonSentence(reason)}`,
+    `Position (FEN): ${fen}`,
+    `Side to move: ${sideName}.`,
+  ];
+  // Keep the reason and complete legal-move count even for unusually long
+  // histories. Leave room for the list marker, truncation notice and contract.
+  const reserved = `\nLegal moves (${legalMoves.length} total): list truncated.\n${suffix}`;
+  const remainingHistory = Math.max(0, MAX_PROMPT_LENGTH - head.join("\n").length - reserved.length - 1);
+  if (history && remainingHistory > 0)
+    head.push(`Moves so far: ${history.slice(0, Math.max(0, remainingHistory - 15))}`);
+  const prefix = `${head.join("\n")}\nLegal moves (${legalMoves.length} total): `;
+  const tokens = [];
+  const safeMoves = legalMoves.map(hyphenated);
+  for (const token of safeMoves) {
+    const next = [...tokens, token].join(" ");
+    const truncated = tokens.length + 1 < safeMoves.length ? " (list truncated)" : "";
+    if (`${prefix}${next}${truncated}\n${suffix}`.length > MAX_PROMPT_LENGTH) break;
+    tokens.push(token);
+  }
+  const truncated = tokens.length < safeMoves.length ? " (list truncated)" : "";
+  return `${prefix}${tokens.join(" ") || "none"}${truncated}\n${suffix}`;
+}
+
+/** @param {string} uci */
+function hyphenated(uci) {
+  return typeof uci === "string" && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)
+    ? `${uci.slice(0, 2)}-${uci.slice(2)}`
+    : String(uci)
+        .slice(0, 20)
+        .replace(/[^a-z0-9-]/gi, "?");
 }
 
 /**
@@ -212,17 +255,21 @@ export function formatMoveList(moves, { startMoveNumber = 1, blackToMoveFirst = 
  * @returns {boolean} true when `text` is (part of) `prompt`.
  */
 export function isEchoOfPrompt(text, prompt) {
-  if (!prompt || !text) {
-    return false;
-  }
+  if (!text) return false;
+  if (isPromptShaped(text)) return true;
+  if (!prompt) return false;
   const normalise = (value) => value.replace(/\s+/g, " ").trim();
   const haystack = normalise(text);
   const needle = normalise(prompt);
-  if (haystack === needle) {
-    return true;
-  }
-  if (needle.length > 40 && haystack.startsWith(needle.slice(0, 40))) {
-    return true;
-  }
-  return haystack.includes("Position (FEN):") && haystack.includes("Chess move request.");
+  return haystack === needle || (needle.length > 40 && haystack.startsWith(needle.slice(0, 40)));
+}
+
+/** A quote of a prompt or a legal-move list is not a reply. */
+function isPromptShaped(text) {
+  return (
+    /Chess move request\.|Position \(FEN\):|Starting position \(FEN\):|The move \[[a-h][1-8][a-h][1-8]/i.test(text) ||
+    /Legal moves\s*\(/i.test(text) ||
+    /Previously rejected UCIs/i.test(text) ||
+    /Let's play chess\. You are/i.test(text)
+  );
 }

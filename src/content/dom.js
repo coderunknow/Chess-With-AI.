@@ -8,7 +8,7 @@
  * v0.2.0 adds:
  * - Ordered typing strategies with read-back verification
  * - Framework-specific paths for ProseMirror/Lexical/Quill
- * - Submit with confirmation (button → Enter → requestSubmit)
+ * - One submit method with full read-back and transcript confirmation
  * - User message appearance detection
  * - SAN normalization helpers (figurine unicode, 0-0/O-O, annotations)
  *
@@ -80,7 +80,7 @@ export function isUserSideElement(element) {
   }
   return Boolean(
     element.closest(
-      "textarea, input, form, [contenteditable='true'], [data-message-author-role='user'], [data-content='user-message'], .font-user-message",
+      "textarea, input, form, [contenteditable='true'], [data-message-author-role='user'], [data-content='user-message'], [data-testid='user-message'], user-query, .query-text, .font-user-message, .user-message",
     ),
   );
 }
@@ -289,7 +289,7 @@ export function typeIntoWithStrategies(element, value) {
   try {
     const inserted = document.execCommand("insertText", false, value);
     const after = readComposer(element);
-    if (inserted && after.includes(value.slice(0, Math.min(20, value.length)))) {
+    if (inserted && after) {
       dispatchInputEvent(element, value);
       if (verifyComposerContains(element, value)) {
         return { ok: true, method: "execCommand" };
@@ -409,16 +409,18 @@ export function typeIntoWithStrategies(element, value) {
 /**
  * @param {HTMLElement} element
  * @param {string} value
- * @returns {boolean} true when composer contains value (or significant prefix)
+ * @returns {boolean} true ONLY when the entire prompt matches, collapsing whitespace.
  */
 export function verifyComposerContains(element, value) {
-  const current = readComposer(element);
-  if (!current) return false;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return false;
-  // Check for at least first 20 chars or 50% of prompt
-  const probe = trimmed.slice(0, Math.min(30, trimmed.length));
-  return current.includes(probe) || current.trim().length >= trimmed.length * 0.8;
+  if (typeof value !== "string" || !value.trim()) return false;
+  return collapseWhitespace(readComposer(element)) === collapseWhitespace(value);
+}
+
+/** @param {string} value */
+export function collapseWhitespace(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -433,7 +435,8 @@ export function isComposerEmpty(element) {
 }
 
 /**
- * Dispatches the full Enter key sequence, which many composers require.
+ * Dispatches one Enter keydown. Sending keypress/keyup as well would let
+ * hosts that listen to multiple key events submit the same prompt twice.
  *
  * @param {HTMLElement} element
  */
@@ -447,9 +450,7 @@ export function pressEnter(element) {
     cancelable: true,
     composed: true,
   };
-  for (const type of ["keydown", "keypress", "keyup"]) {
-    element.dispatchEvent(new KeyboardEvent(type, base));
-  }
+  element.dispatchEvent(new KeyboardEvent("keydown", base));
 }
 
 /**
@@ -537,11 +538,73 @@ export function normaliseReplyText(text) {
  * @returns {boolean} true when the element looks like a sending/in-flight indicator.
  */
 export function isBusyIndicator(element) {
-  if (!isElement(element)) {
-    return false;
+  return isStopControl(element) || isStreamingElement(element);
+}
+
+/** Accessible name plus stable semantic attributes; never depend on class hashes. */
+export function controlName(element) {
+  if (!isElement(element)) return "";
+  const labelledBy = element.getAttribute("aria-labelledby");
+  const labelText = labelledBy
+    ? labelledBy
+        .split(/\s+/)
+        .map((id) => globalThis.document?.getElementById(id)?.textContent || "")
+        .join(" ")
+    : "";
+  return [
+    element.getAttribute("aria-label"),
+    element.getAttribute("title"),
+    element.getAttribute("data-testid"),
+    labelText,
+    element.textContent,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Stop, cancel, interrupt, streaming indicators (including Vietnamese labels). */
+export function isStopControl(element) {
+  return isElement(element) && /\b(stop|cancel|interrupt|generating|streaming)\b|dừng/i.test(controlName(element));
+}
+
+export function isSendControl(element) {
+  return isElement(element) && !isStopControl(element) && /\b(send|submit)\b|gửi/i.test(controlName(element));
+}
+
+/** Platforms may mark an assistant turn as streaming without showing Stop. */
+export function isStreamingElement(element) {
+  if (!isElement(element)) return false;
+  return (
+    element.getAttribute("data-is-streaming") === "true" ||
+    element.getAttribute("data-streaming") === "true" ||
+    element.getAttribute("aria-busy") === "true" ||
+    element.getAttribute("data-status") === "streaming"
+  );
+}
+
+/** One set of user-message nodes, with overlapping parent/child selectors collapsed. */
+export function userMessageSnapshot(root, selectors) {
+  const candidates = new Set();
+  for (const selector of selectors) {
+    try {
+      for (const element of root.querySelectorAll(selector)) {
+        if (isElement(element) && element.isConnected && !isEditable(element)) candidates.add(element);
+      }
+    } catch {
+      // Site selectors can disappear without breaking the send path.
+    }
   }
-  const label = `${element.getAttribute("aria-label") || ""} ${element.getAttribute("data-testid") || ""}`;
-  return /stop|streaming|generating|cancel/i.test(label);
+  return new Set(
+    [...candidates].filter((element) => ![...candidates].some((other) => other !== element && other.contains(element))),
+  );
+}
+
+/** Only a complete new copy of this prompt is a positive confirmation. */
+export function newUserMessages(root, selectors, before, prompt) {
+  return [...userMessageSnapshot(root, selectors)].filter(
+    (node) =>
+      !before.has(node) && (isUserSideElement(node) || collapseWhitespace(textOf(node)) === collapseWhitespace(prompt)),
+  );
 }
 
 /**
