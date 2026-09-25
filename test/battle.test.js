@@ -208,6 +208,22 @@ test("battle snapshot restore comes back PAUSED — never auto-continue", () => 
   assert.deepEqual(restored.sessionSnapshot.moves, ["e2e4"]);
 });
 
+test("malformed or future battle snapshots are rejected before app restore", () => {
+  assert.equal(restoreBattle(null), null);
+  assert.equal(restoreBattle({ version: 99 }), null);
+  assert.equal(restoreBattle({ version: 1, battle: {}, sessionSnapshot: {} }), null);
+
+  const session = new GameSession({ playerColor: "w" });
+  const battle = createBattle({ sides: SIDES, minutesPerSide: 5, incrementSec: 0, maxPlies: 200 });
+  const snapshot = serializeBattle(battle, session);
+  snapshot.battle.clock.whiteMs = "not-a-clock";
+  assert.equal(restoreBattle(snapshot), null);
+
+  const valid = serializeBattle(battle, session);
+  valid.battle.sides.w.tabId = "7";
+  assert.equal(restoreBattle(valid), null);
+});
+
 test("two-tab turn-taking: both AI tabs alternate sends and the local engine never moves", async () => {
   const { app, state, emitRuntimeMessage, teardown } = await bootApp({
     tabs: [CHAT, CLAUDE],

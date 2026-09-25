@@ -1868,6 +1868,10 @@ export class App {
     const value = await readValue(BATTLE_SNAPSHOT_KEY, null);
     if (!value || typeof value !== "object" || !value.battle || !value.sessionSnapshot) return;
     const restored = restoreBattle(value);
+    if (!restored) {
+      await removeValue(BATTLE_SNAPSHOT_KEY);
+      return;
+    }
     const mainColor = restored.battle.sides.w.slot === "main" ? "w" : "b";
     this.#session = GameSession.fromSnapshot(restored.sessionSnapshot, { playerColor: mainColor });
     this.#battleState = {
