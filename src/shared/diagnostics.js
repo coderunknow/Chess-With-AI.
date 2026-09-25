@@ -31,6 +31,7 @@
  * @property {string} matchedAssistant
  * @property {string} typingMethod
  * @property {string} submitMethod
+ * @property {Record<string, number>} stages privacy-safe stage timestamps (latency timeline).
  */
 
 /**
@@ -57,6 +58,7 @@ export function createEmptyReport({ platform = "", url = "" } = {}) {
     matchedAssistant: "",
     typingMethod: "",
     submitMethod: "",
+    stages: {},
   };
 }
 
@@ -81,6 +83,11 @@ export function formatReport(report) {
     ``,
     `Timings (ms): findInput=${report.timings.findInput} generationWait=${report.timings.generationWait} type=${report.timings.type} submit=${report.timings.submit} total=${report.timings.total}`,
     `Stop seen: ${Boolean(report.verification?.stopControlSeen)}; submit: ${report.submitMethod || "none"}; second event suppressed: ${Boolean(report.verification?.secondEventSuppressed)}; full-string equality: ${Boolean(report.verification?.fullStringEquality)}`,
+    `Stage timestamps (epoch ms, no content): ${
+      Object.entries(report.stages || {})
+        .map(([stage, at]) => `${stage}=${at}`)
+        .join(" ") || "none"
+    }`,
     ``,
   ];
 
@@ -168,6 +175,19 @@ export class DiagnosticsCollector {
   /** @param {string} method */
   setSubmitMethod(method) {
     this.#report.submitMethod = method;
+  }
+
+  /**
+   * Records the first observation of a latency stage (numbers only). Late
+   * duplicates never rewrite the original observation.
+   *
+   * @param {string} stage one of `src/shared/latency.js` stage names.
+   * @param {number} [at] epoch ms.
+   */
+  markStage(stage, at = Date.now()) {
+    if (typeof at !== "number" || !Number.isFinite(at)) return;
+    if (Object.hasOwn(this.#report.stages, stage)) return;
+    this.#report.stages[stage] = at;
   }
 
   /** @param {string} platform */

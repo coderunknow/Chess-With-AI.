@@ -324,3 +324,27 @@ test("a new move scrolls only the move-list container, never the page", () => {
     env.dom.restore();
   }
 });
+
+test("an unchanged move-list render rebuilds no DOM (memoized on ply + revision)", () => {
+  const env = mountHistory();
+  try {
+    const history = [moveEntry({ uci: "e2e4", san: "e4" })];
+    env.view.render(history, { startMoveNumber: 1, firstMover: "w", currentPly: 1 });
+    const firstRow = env.list.children[0];
+
+    // Selection clicks re-render the panel with identical history state.
+    env.view.render(history, { startMoveNumber: 1, firstMover: "w", currentPly: 1 });
+    assert.equal(env.list.children[0], firstRow, "an unchanged list must keep its DOM nodes");
+
+    // A moved replay cursor is new state and must rebuild.
+    env.view.render(history, { startMoveNumber: 1, firstMover: "w", currentPly: 0 });
+    assert.notEqual(env.list.children[0], firstRow, "a cursor change rebuilds the list");
+
+    // A revision bump (e.g. comments added to existing entries) rebuilds too.
+    const rebuilt = env.list.children[0];
+    env.view.render(history, { startMoveNumber: 1, firstMover: "w", currentPly: 0, revision: 3 });
+    assert.notEqual(env.list.children[0], rebuilt, "a revision bump rebuilds the list");
+  } finally {
+    env.dom.restore();
+  }
+});

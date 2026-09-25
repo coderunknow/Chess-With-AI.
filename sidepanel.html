@@ -211,6 +211,97 @@
         </div>
       </details>
 
+      <details class="panel-section" id="battle-section">
+        <summary id="battle-title" data-i18n="battle.title">AI battle (unrated)</summary>
+        <div class="section-body">
+          <p class="hint" data-i18n="battle.separation"></p>
+          <div class="row">
+            <label class="field" for="battle-opponent-tab"
+              ><span id="battle-opponent-tab-label" data-i18n="battle.opponentTab">Opponent tab</span>
+              <input id="battle-opponent-tab" type="number" min="1" inputmode="numeric" />
+            </label>
+            <label class="field" for="battle-opponent-color"
+              ><span id="battle-opponent-color-label" data-i18n="battle.opponentColor">Opponent plays</span>
+              <select id="battle-opponent-color" class="select">
+                <option value="w" data-i18n="battle.playWhite">White</option>
+                <option value="b" selected data-i18n="battle.playBlack">Black</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field" for="battle-minutes"
+              ><span id="battle-minutes-label" data-i18n="battle.minutes">Minutes per side</span>
+              <select id="battle-minutes" class="select">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="5" selected>5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="30">30</option>
+                <option value="60">60</option>
+              </select>
+            </label>
+            <label class="field" for="battle-increment"
+              ><span id="battle-increment-label" data-i18n="battle.increment">Increment (seconds)</span>
+              <select id="battle-increment" class="select">
+                <option value="0" selected>0</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <button id="battle-start" type="button" class="button" data-i18n="battle.start">Start battle</button>
+            <button id="battle-pause" type="button" class="button" data-i18n="battle.pause">Pause</button>
+            <button id="battle-resume" type="button" class="button" data-i18n="battle.resume">Resume</button>
+            <button id="battle-ask-again" type="button" class="button" data-i18n="battle.askAgain">Ask again</button>
+            <button id="battle-abort" type="button" class="button" data-i18n="battle.abort">Abort battle</button>
+            <button id="battle-rematch" type="button" class="button" data-i18n="battle.rematch">Rematch</button>
+            <button id="battle-export" type="button" class="button" data-i18n="battle.export">Export battle PGN</button>
+            <button id="battle-export-all" type="button" class="button" data-i18n="battle.exportAll">
+              Export all battles
+            </button>
+          </div>
+          <p id="battle-status" role="status" aria-live="polite"></p>
+          <details class="secondary-view">
+            <summary id="battle-history-heading" data-i18n="battle.history">Battles history</summary>
+            <p id="battle-ledger" class="mono"></p>
+            <ul id="battle-history"></ul>
+          </details>
+        </div>
+      </details>
+
+      <details class="panel-section" id="studio-section">
+        <summary id="studio-title" data-i18n="studio.title">Prompt Studio</summary>
+        <div class="section-body">
+          <p class="hint" id="studio-platform"></p>
+          <p class="hint" data-i18n="studio.empty"></p>
+          <div class="row">
+            <label class="field" for="studio-style"
+              ><span id="studio-style-label" data-i18n="studio.styleLabel">Preview style</span>
+              <select id="studio-style" class="select">
+                <option value="standard" data-i18n="settings.styleStandard">Standard</option>
+                <option value="concise" data-i18n="settings.styleConcise">Concise</option>
+                <option value="efficient" data-i18n="settings.styleEfficient">Efficient — move only</option>
+                <option value="fun" data-i18n="settings.styleFun">Fun — with commentary</option>
+              </select>
+            </label>
+            <label class="field" id="studio-fun-row" for="studio-fun-sentences" hidden
+              ><span id="studio-fun-sentences-label" data-i18n="settings.funSentences">Fun commentary (sentences)</span>
+              <input id="studio-fun-sentences" type="range" min="1" max="2" step="1" value="2" />
+            </label>
+          </div>
+          <p id="studio-metrics" class="mono"></p>
+          <p id="studio-budget-hint" class="hint" data-i18n="studio.overBudget" hidden></p>
+          <pre id="studio-preview" class="diagnostics"></pre>
+          <div class="row">
+            <button id="studio-copy" type="button" class="button" data-i18n="studio.copy">Copy prompt</button>
+          </div>
+        </div>
+      </details>
+
       <details class="panel-section advanced-only" id="position-section">
         <summary id="position-title">Position</summary>
         <div class="section-body">
@@ -254,6 +345,14 @@
               <dd id="diag-error">—</dd>
             </div>
           </dl>
+          <div class="meta-row">
+            <dt data-i18n="timeline.title">Latency timeline</dt>
+            <dd>
+              <ol id="latency-timeline" class="mono"></ol>
+              <p class="hint" data-i18n="timeline.privacy"></p>
+              <button id="copy-timeline" type="button" class="button" data-i18n="timeline.copy">Copy (redacted)</button>
+            </dd>
+          </div>
           <pre id="diagnostics-report" class="diagnostics" hidden></pre>
           <div class="row">
             <button id="copy-diagnostics" type="button" class="button">Copy report</button>
@@ -447,6 +546,20 @@
             <option value="auto" data-i18n="settings.sendAuto">Auto — send one message</option>
             <option value="manual" data-i18n="settings.sendManual">Manual — copy and paste</option>
           </select>
+        </label>
+        <label class="field" for="settings-prompt-style"
+          ><span id="settings-prompt-style-label">Response style</span>
+          <select id="settings-prompt-style" class="select">
+            <option value="standard" data-i18n="settings.styleStandard">Standard</option>
+            <option value="concise" data-i18n="settings.styleConcise">Concise</option>
+            <option value="efficient" data-i18n="settings.styleEfficient">Efficient — move only</option>
+            <option value="fun" data-i18n="settings.styleFun">Fun — with commentary</option>
+          </select>
+        </label>
+        <label class="field" for="settings-fun-sentences"
+          ><span id="settings-fun-sentences-label">Fun commentary (sentences)</span>
+          <input id="settings-fun-sentences" type="range" min="1" max="2" step="1" value="2" />
+          <span id="settings-fun-sentences-hint" class="hint" data-i18n="settings.funSentencesHint"></span>
         </label>
         <label class="field" for="settings-generation-wait"
           ><span id="settings-generation-wait-label">Wait for generation (seconds)</span>

@@ -36,8 +36,16 @@ export const INPUT_TIMEOUT_MS = 5000;
 export const GENERATION_WAIT_MS = 120000;
 /** Wait for confirmation after ONE submit, without submitting again. */
 export const SUBMIT_SETTLE_MS = 6000;
-/** A short window to catch a duplicated user message after initial confirmation. */
-export const USER_MESSAGE_TIMEOUT_MS = 350;
+/** Adaptive waiting polls: fast-start with doubling backoff, capped. */
+export const POLL_FAST_START_MS = 40;
+export const POLL_MAX_MS = 160;
+/**
+ * One fast beat so the contradiction/fail-closed check has had its chance
+ * before an evidence-based early exit. v0.6 burned a fixed 350ms user-echo
+ * timeout plus a recheck chain even when the echo was already visible; the
+ * verdict logic (confirmed / contradicted / unconfirmed) is unchanged.
+ */
+export const CONTRADICTION_BEAT_MS = 40;
 
 export const SendResult = Object.freeze({
   OK: "ok",
@@ -281,6 +289,7 @@ export class ChatBridge {
     const start = Date.now();
     let stopSeen = false;
     let waiting = false;
+    let pollMs = POLL_FAST_START_MS;
     for (;;) {
       if (this.#cancelled) return { input: null, waitMs: Date.now() - start, stopSeen, timedOut: false };
       const state = this.findGenerationState();
@@ -298,7 +307,8 @@ export class ChatBridge {
       if (elapsed >= (state.generating || waiting ? this.generationWaitMs : this.inputTimeout)) {
         return { input: null, waitMs: elapsed, stopSeen, timedOut: waiting || state.generating };
       }
-      await delay(100);
+      await delay(pollMs);
+      pollMs = Math.min(pollMs * 2, POLL_MAX_MS); // 40 -> 80 -> 160, capped
     }
   }
 
@@ -317,6 +327,7 @@ export class ChatBridge {
       // later failure to observe confirmation must never be reported as
       // "nothing was sent".
       this.#attemptedSubmit = true;
+      this.#diagnostics.markStage("submitted");
       try {
         onSubmit();
         button.click();
@@ -336,6 +347,7 @@ export class ChatBridge {
     this.#diagnostics.setSubmitMethod("enter");
     this.#diagnostics.setVerification({ secondEventSuppressed: true });
     this.#attemptedSubmit = true;
+    this.#diagnostics.markStage("submitted");
     try {
       onSubmit();
       pressEnter(input);
@@ -367,24 +379,40 @@ export class ChatBridge {
       return current ? isComposerEmpty(current) : false;
     };
     const matchesPrompt = (node) => collapseWhitespace(textOf(node)) === collapseWhitespace(prompt);
+    let pollMs = POLL_FAST_START_MS;
     for (;;) {
       const messages = newUserMessages(document, this.#userSelectors, before, prompt);
       if (messages.length > 1) return "contradicted";
       const seenPrompt = messages.length === 1 && matchesPrompt(messages[0]);
+      if (seenPrompt) this.#diagnostics.markStage("echo-observed");
       if (seenPrompt || composerEmpty()) {
-        await delay(USER_MESSAGE_TIMEOUT_MS);
+        // Evidence exists — early-exit once the contradiction beat has had its
+        // chance. The verdict chain below is byte-for-byte the v0.6 fail-closed
+        // logic: a different new user message still proves "not sent".
+        await delay(CONTRADICTION_BEAT_MS);
         const after = newUserMessages(document, this.#userSelectors, before, prompt);
         // A cleared composer is useful confirmation only when no contradicting
         // user message exists. A different user message means the transcript
         // does not contain our prompt — fail closed as "not sent".
-        if (after.length === 0) return composerEmpty() ? "confirmed" : "unconfirmed";
-        if (after.length === 1) return matchesPrompt(after[0]) ? "confirmed" : "contradicted";
+        if (after.length === 0) {
+          const cleared = composerEmpty();
+          if (cleared) this.#diagnostics.markStage("echo-observed"); // composer-clear is the user-side confirmation
+          return cleared ? "confirmed" : "unconfirmed";
+        }
+        if (after.length === 1) {
+          if (matchesPrompt(after[0])) {
+            this.#diagnostics.markStage("echo-observed");
+            return "confirmed";
+          }
+          return "contradicted";
+        }
         return "contradicted";
       }
       // No transcript evidence and a non-empty composer: wait out the settle
       // window (late echoes arrive), then report unconfirmed — NOT "failed".
       if (Date.now() - started >= this.submitSettleMs) return "unconfirmed";
-      await delay(80);
+      await delay(pollMs);
+      pollMs = Math.min(pollMs * 2, POLL_MAX_MS); // 40 -> 80 -> 160, capped
     }
   }
 

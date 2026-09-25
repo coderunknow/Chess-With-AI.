@@ -459,6 +459,7 @@ export class MoveWatcher {
 
       log.debug("detected AI move", move, candidates);
       this.#lastScanHadNoMove = false;
+      this.#diagnostics?.markStage("reply-detected");
       this.onMove({ move, candidates, text: normalized.slice(0, 400) });
       return;
     }

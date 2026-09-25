@@ -28,8 +28,29 @@ import { IllegalReason, explainIllegalMove } from "../core/illegal-move.js";
 import { formatPgn } from "../core/pgn.js";
 import { createLogger } from "../shared/log.js";
 import { MessageType, createMessage, describeRuntimeError, normaliseResponse } from "../shared/messaging.js";
+import {
+  BATTLE_LEDGER_KEY,
+  BATTLE_SNAPSHOT_KEY,
+  adjudicateIfNeeded,
+  battlePairKey,
+  battleRemainingMs,
+  completeMove,
+  createBattle,
+  flagResult,
+  gameEndResult,
+  pairedPgns,
+  pauseBattleClock,
+  recordBattleResult,
+  resignationResult,
+  restoreBattle,
+  resumeBattleClock,
+  serializeBattle,
+  tickBattle,
+} from "../shared/battle.js";
 import { PLATFORMS, platformForUrl } from "../shared/platforms.js";
-import { buildMovePrompt, buildOpeningPrompt, buildRetryPrompt } from "../shared/prompt.js";
+import { buildRetryPrompt, buildTurnPrompt, formatMoveList } from "../shared/prompt.js";
+import { buildStudioPreview } from "./studio.js";
+import { LatencyTimeline, formatLatencyReport } from "../shared/latency.js";
 import { DEFAULT_SETTINGS, SETTINGS_KEY, mergeSettings, resolveTheme, resolveLocale } from "../shared/settings.js";
 import { readValue, removeValue, writeValue } from "../shared/storage.js";
 import { createTranslator } from "../shared/i18n.js";
@@ -70,6 +91,21 @@ export const Phase = Object.freeze({
 });
 
 const CONTENT_SCRIPT_FILE = "src/content/index.js";
+
+/**
+ * Runs non-critical work (badge, sound, announcements) off the accept path.
+ * Bare `setTimeout` keeps Node mock timers in charge; browsers may coalesce
+ * via `requestIdleCallback`.
+ *
+ * @param {() => void} fn
+ */
+function scheduleOffPath(fn) {
+  if (typeof globalThis.requestIdleCallback === "function") {
+    globalThis.requestIdleCallback(fn);
+  } else {
+    setTimeout(fn, 0);
+  }
+}
 
 export class App {
   /** @type {GameSession} */
@@ -132,6 +168,10 @@ export class App {
   #matchFinished = false;
   #delivery = null;
   #waitingReminderTimer = 0;
+  /** Privacy-safe per-move latency timeline (stage deltas only, ring of 20). */
+  #latency = new LatencyTimeline();
+  /** @type {Map<string, HTMLElement|null>} cache for static element ids. */
+  #byIdCache = new Map();
 
   /**
    * @param {object} refs DOM references resolved by `main.js`.
@@ -164,6 +204,7 @@ export class App {
     clearTimeout(this.#announceTimer);
     clearTimeout(this.#waitingReminderTimer);
     clearInterval(this.#clockTimer);
+    if (this.#battleTimer) clearInterval(this.#battleTimer);
     this.#stopStockfish();
     this.#engineWorker?.terminate();
   }
@@ -171,6 +212,80 @@ export class App {
   /** @returns {GameSession} the active session (read-only use). */
   get session() {
     return this.#session;
+  }
+
+  /** @returns {Readonly<Record<string, any>>} the effective settings (read-only). */
+  get settings() {
+    return { ...this.#settings };
+  }
+
+  /** @returns {string} the last status message (read-only). */
+  get message() {
+    return this.#message;
+  }
+
+  /** @returns {LatencyTimeline} the privacy-safe latency timeline (stage deltas only). */
+  get latency() {
+    return this.#latency;
+  }
+
+  /**
+   * The shared prompt context: one builder input for the send path AND the
+   * Prompt Studio, so both always produce byte-identical strings.
+   *
+   * @param {object} [extra] overrides (studio toggles, battle clock).
+   * @returns {object} a {@link buildTurnPrompt} context.
+   */
+  #turnPromptContext(extra = {}) {
+    const session = this.#session;
+    const last = session.lastMove;
+    return {
+      fen: session.fen,
+      uci: last?.uci || "",
+      san: last?.san || "",
+      aiColor: session.aiColor,
+      history: session.moveListText,
+      plyCount: session.plyCount,
+      style: this.#settings.promptStyle,
+      funSentences: this.#settings.funCommentarySentences,
+      battleClock: null, // set by the battle loop while a battle runs
+      ...extra,
+    };
+  }
+
+  /**
+   * Prompt Studio preview: the exact string the send path would dispatch for
+   * the current position. Overrides only change the preview, never settings.
+   *
+   * @param {object} [overrides]
+   * @param {string} [overrides.style]
+   * @param {number} [overrides.funSentences]
+   * @param {object|null} [overrides.battleClock] battle-preview clock cue.
+   * @returns {import('./studio.js').StudioPreview}
+   */
+  studioPreview(overrides = {}) {
+    const { style, funSentences, battleClock = null, ...rest } = overrides || {};
+    const context = this.#turnPromptContext({
+      ...(style ? { style } : {}),
+      ...(funSentences ? { funSentences } : {}),
+      battleClock,
+      ...rest,
+    });
+    return buildStudioPreview({ context, platformLabel: this.#connection.label });
+  }
+
+  /**
+   * Cached `getElementById`: hot renders must not re-query the document for
+   * the same static ids on every state change.
+   *
+   * @param {string} id
+   * @returns {HTMLElement|null}
+   */
+  #el(id) {
+    if (!this.#byIdCache.has(id)) {
+      this.#byIdCache.set(id, typeof document !== "undefined" ? document.getElementById(id) : null);
+    }
+    return this.#byIdCache.get(id);
   }
 
   #initI18n() {
@@ -495,6 +610,15 @@ export class App {
           void 0;
         }
       }
+
+      // A persisted battle restores PAUSED with Resume — never auto-continue.
+      try {
+        const ledger = await readValue(BATTLE_LEDGER_KEY, {});
+        this.#battleLedger = ledger && typeof ledger === "object" ? ledger : {};
+        await this.#restoreBattleFromStorage();
+      } catch (e) {
+        log.warn("battle restore failed", e);
+      }
     } catch (error) {
       log.error("start() fatal error", error);
       this.#message = `Startup failed: ${error?.message || error}. Try New Game or reset settings.`;
@@ -532,7 +656,7 @@ export class App {
 
   /** Shows the one-paragraph first-run note until the user dismisses it. */
   #initFirstRun() {
-    const note = document.getElementById("first-run");
+    const note = this.#el("first-run");
     if (!note) return;
     let dismissed = false;
     try {
@@ -542,9 +666,9 @@ export class App {
     }
     if (dismissed) return;
     note.hidden = false;
-    const text = document.getElementById("first-run-text");
+    const text = this.#el("first-run-text");
     if (text) text.textContent = this.#t("firstRun.text");
-    const dismiss = document.getElementById("first-run-dismiss");
+    const dismiss = this.#el("first-run-dismiss");
     if (dismiss && !dismiss.dataset.bound) {
       dismiss.dataset.bound = "1";
       dismiss.textContent = this.#t("firstRun.dismiss");
@@ -601,7 +725,7 @@ export class App {
     const t = this.#t;
     // Update static UI text via textContent (never innerHTML)
     const setText = (id, key, params) => {
-      const el = document.getElementById(id);
+      const el = this.#el(id);
       if (el) {
         el.textContent = t(key, params);
       }
@@ -672,6 +796,8 @@ export class App {
       "settings-ai-group": "settings.groupAi",
       "settings-engine-group": "settings.groupEngine",
       "settings-max-retries-label": "settings.maxRetries",
+      "settings-prompt-style-label": "settings.responseStyle",
+      "settings-fun-sentences-label": "settings.funSentences",
       "settings-send-mode-label": "settings.sendMode",
       "settings-generation-wait-label": "settings.generationWait",
       "settings-sound-volume-label": "settings.soundVolume",
@@ -711,12 +837,12 @@ export class App {
     for (const node of document.querySelectorAll("[data-i18n]")) {
       node.textContent = t(node.dataset.i18n);
     }
-    document.getElementById("tab-list")?.setAttribute("aria-label", t("connections.tabList"));
-    document.getElementById("switch-side")?.setAttribute("title", t("controls.switchSideTitle"));
-    document.getElementById("board")?.setAttribute("aria-label", t("board.label"));
-    document.getElementById("fen")?.setAttribute("aria-label", t("position.fen"));
-    document.getElementById("library-search")?.setAttribute("placeholder", t("library.search"));
-    document.getElementById("pgn-text")?.setAttribute("placeholder", t("pgn.placeholder"));
+    this.#el("tab-list")?.setAttribute("aria-label", t("connections.tabList"));
+    this.#el("switch-side")?.setAttribute("title", t("controls.switchSideTitle"));
+    this.#el("board")?.setAttribute("aria-label", t("board.label"));
+    this.#el("fen")?.setAttribute("aria-label", t("position.fen"));
+    this.#el("library-search")?.setAttribute("placeholder", t("library.search"));
+    this.#el("pgn-text")?.setAttribute("placeholder", t("pgn.placeholder"));
   }
 
   /**
@@ -919,6 +1045,7 @@ export class App {
     if (this.#match && (session.turn !== this.#match.aiColor || this.#connection.tabId !== this.#match.tabId)) return;
     if (payload.diagnostics) {
       this.#diagnostics = payload.diagnostics;
+      this.#latency.mergeExternal(payload.diagnostics.stages);
       this.#renderDiagnostics();
     }
     this.#clearWaitingReminder();
@@ -950,6 +1077,7 @@ export class App {
       await this.#retryAfterIllegalMove(this.#t("status.noMove"), { code: IllegalReason.MALFORMED, facts: {} });
       return;
     }
+    this.#latency.mark("parsed");
     // First bracketed UCI wins; a rejected first answer must not let a later
     // quoted example or legal-list item masquerade as the actual reply.
     if (session.rejectedMoves.includes(candidates[0])) {
@@ -958,6 +1086,7 @@ export class App {
     }
     const result = session.playFirstAvailable([candidates[0]]);
     if (result.ok) {
+      this.#latency.mark("accepted");
       this.#phase = Phase.IDLE;
       this.#message = "";
       this.#lastIllegalReply = null;
@@ -969,10 +1098,14 @@ export class App {
       if (this.#match) this.#match.chatMoves += 1;
       this.#persist();
       this.#render();
-      this.#updateBadge();
-      this.#playSoundForMove(result.entry);
-      this.#updateClockAfterMove();
-      this.#announceMove(result.entry);
+      this.#latency.mark("rendered");
+      this.#latency.finish();
+      this.#updateClockAfterMove(); // clock state is correctness-critical
+      scheduleOffPath(() => {
+        this.#updateBadge();
+        this.#playSoundForMove(result.entry);
+        this.#announceMove(result.entry);
+      });
       if (session.isGameOver) {
         // Terminal board result: invalidate every in-flight callback of the
         // request that produced this reply. A late acknowledgement, timeout or
@@ -1097,15 +1230,12 @@ export class App {
     )
       return; // an unanswered one-shot request must never be sent a second time
     if (this.#session.isGameOver || this.#session.isPlayerTurn) return;
-    const session = this.#session;
     // After an illegal reply, Ask again is ONE corrective prompt, not another
     // opening/move request and not a new automatic retry cycle.
     const correction = this.#phase === Phase.ERROR ? this.#lastIllegalReply : null;
     const prompt = correction
       ? this.#correctionPrompt(correction.uci, correction.reason)
-      : session.plyCount === 0
-        ? buildOpeningPrompt({ aiColor: session.aiColor, fen: session.fen })
-        : this.#movePrompt();
+      : buildTurnPrompt(this.#turnPromptContext());
     await this.#sendPrompt(prompt, { expected: "ai-move" });
   }
 
@@ -1372,10 +1502,12 @@ export class App {
     this.#message = "";
     this.#lastIllegalReply = null;
     this.#persist();
-    this.#updateBadge();
-    this.#playSoundForMove(result.entry);
-    this.#updateClockAfterMove();
-    this.#announceMove(result.entry);
+    this.#updateClockAfterMove(); // clock state is correctness-critical
+    scheduleOffPath(() => {
+      this.#updateBadge();
+      this.#playSoundForMove(result.entry);
+      this.#announceMove(result.entry);
+    });
 
     if (session.isGameOver) {
       // The human's move ended the game: no new chess prompt may be created,
@@ -1400,16 +1532,541 @@ export class App {
   }
 
   /** @returns {string} a move request for the current position. */
-  #movePrompt() {
-    const session = this.#session;
-    const last = session.lastMove;
-    return buildMovePrompt({
-      fen: session.fen,
-      uci: last?.uci || "",
-      san: last?.san || "",
-      aiColor: session.aiColor,
-      history: session.moveListText,
+  // =========================================================================
+  // AI battle (UNRATED): two pinned AI tabs play one full clocked game. The
+  // battle game is owned by GameSession exactly like a normal game; the local
+  // engine NEVER plays a move in battle. One submit per tab per turn, replies
+  // routed strictly by tab + requestId per side, illegal/no-move replies get
+  // bounded per-side retries and then PAUSE — nothing is ever fabricated.
+  // =========================================================================
+
+  /** @type {any} */
+  #battleState = null;
+  /** @type {ReturnType<typeof setInterval>|null} */
+  #battleTimer = null;
+  #battleCounter = 0;
+  /** @type {Record<string, any>} */
+  #battleLedger = {};
+
+  /** Explicit user action: battles run only in Auto send mode. */
+  async enableAutoSend() {
+    await this.updateSettings({ sendMode: "auto" });
+  }
+
+  /**
+   * Starts a battle between the MAIN pinned tab and a battle-only opponent
+   * slot. Creates the opponent slot for the duration of the battle and tears
+   * it down when the battle ends — the MAIN pin invariant is untouched.
+   *
+   * @param {{opponentTabId: number, opponentColor?: 'w'|'b', minutesPerSide?: number, incrementSec?: number, maxPlies?: number}} options
+   * @param {{confirmed?: boolean}} [flow]
+   */
+  async startBattle(
+    { opponentTabId, opponentColor = "b", minutesPerSide, incrementSec, maxPlies } = {},
+    { confirmed = false } = {},
+  ) {
+    if (this.#settings.sendMode !== "auto") {
+      this.#message = this.#t("battle.manualMode");
+      this.#announce(this.#message);
+      this.#render();
+      return { ok: false, reason: "manual", canEnableAuto: true };
+    }
+    if (this.#battleState && !this.#battleState.finished) {
+      return { ok: false, reason: "already-running" };
+    }
+    if (!this.#pin) {
+      this.#message = this.#t("battle.needsMainPin");
+      this.#render();
+      return { ok: false, reason: "no-main-pin" };
+    }
+    if (opponentTabId === this.#pin.tabId) return { ok: false, reason: "same-tab" };
+    if (this.#session.plyCount > 0 && !confirmed) {
+      // Same confirm-and-replace contract as a rated match switch: only ever
+      // after an explicit confirmation from the user.
+      if (typeof globalThis.confirm === "function" && !globalThis.confirm(this.#t("controls.confirmReplaceGame"))) {
+        this.#message = this.#t("battle.startCancelled");
+        this.#render();
+        return { ok: false, reason: "aborted" };
+      }
+    }
+    // Battle-only opponent slot (parameterised pin machinery, no new hosts).
+    const pinned = await chrome.runtime.sendMessage(
+      createMessage(MessageType.PIN_TAB, { tabId: opponentTabId, slot: "opponent" }),
+    );
+    if (!pinned?.ok || !pinned.pin) {
+      this.#message = this.#t("battle.pinFailed");
+      this.#render();
+      return { ok: false, reason: "pin-failed", error: pinned?.error || "" };
+    }
+    const oppColor = opponentColor === "w" ? "w" : "b";
+    const mainSide = {
+      tabId: this.#pin.tabId,
+      slot: "main",
+      platformId: this.#pin.platformId,
+      label: this.#pin.label,
+      title: this.#pin.title,
+      url: this.#pin.url,
+    };
+    const oppSide = {
+      tabId: pinned.pin.tabId,
+      slot: "opponent",
+      platformId: pinned.pin.platformId,
+      label: pinned.pin.label || pinned.pin.platformId,
+      title: pinned.pin.title,
+      url: pinned.pin.url,
+    };
+    const sides = oppColor === "w" ? { w: oppSide, b: mainSide } : { w: mainSide, b: oppSide };
+    // A fresh GameSession owns the battle game; the local engine is never
+    // started for it (playBattleReply applies both sides' AI moves strictly).
+    this.#session = new GameSession({ playerColor: oppColor === "w" ? "b" : "w" });
+    this.#cancelReply();
+    this.#matchFinished = false;
+    this.#localEngineMode = false;
+    this.#lastIllegalReply = null;
+    this.#expectedReplyId = null;
+    this.#retryPending = false;
+    this.#delivery = { state: DeliveryState.NEVER };
+    this.#latency = new LatencyTimeline();
+    this.#phase = Phase.IDLE;
+    this.#message = "";
+    this.#battleState = {
+      battle: createBattle({
+        sides,
+        minutesPerSide: minutesPerSide ?? this.#settings.battleMinutesPerSide,
+        incrementSec: incrementSec ?? this.#settings.battleIncrementSec,
+        maxPlies: maxPlies ?? this.#settings.battleMaxPlies,
+      }),
+      epoch: 1,
+      pending: null,
+      latency: null,
+      paused: false,
+      pauseReason: "",
+      finished: false,
+      moveSources: [],
+      lastPrompts: { w: null, b: null },
+    };
+    void this.updateSettings({
+      battleMinutesPerSide: this.#battleState.battle.minutesPerSide,
+      battleIncrementSec: this.#battleState.battle.incrementSec,
+      battleMaxPlies: this.#battleState.battle.maxPlies,
     });
+    this.#startBattleTicking();
+    await this.#persistBattleSnapshot();
+    this.#render();
+    void this.#battleDispatch();
+    return { ok: true };
+  }
+
+  /** One-click rematch reusing both slots and the same color assignment. */
+  async startRematch() {
+    const bt = this.#battleState;
+    if (!bt) return { ok: false, reason: "none" };
+    const sides = bt.battle.sides;
+    const oppColor = sides.w.slot === "opponent" ? "w" : "b";
+    const opponentTabId = sides[oppColor].tabId;
+    const settings = {
+      opponentTabId,
+      opponentColor: oppColor,
+      minutesPerSide: bt.battle.minutesPerSide,
+      incrementSec: bt.battle.incrementSec,
+      maxPlies: bt.battle.maxPlies,
+    };
+    if (!bt.finished) {
+      this.#battleFinish({ token: "*", reason: "aborted", winner: null }, { ledger: false });
+    }
+    this.#battleState = null;
+    return this.startBattle(settings, { confirmed: true });
+  }
+
+  /** Soft pause (user): clock stops, outstanding callbacks are invalidated. */
+  pauseBattle() {
+    void this.#battlePause(this.#t("battle.pausedByUser"));
+  }
+
+  /** Resume is always an explicit user action — never auto-continue. */
+  resumeBattle() {
+    const bt = this.#battleState;
+    if (!bt || bt.finished || !bt.paused) return;
+    bt.paused = false;
+    bt.epoch += 1;
+    resumeBattleClock(bt.battle, this.#session.turn, Date.now());
+    this.#message = "";
+    this.#render();
+    void this.#battleDispatch();
+  }
+
+  /** Explicit recovery: re-send the SAME prompt to the side to move. */
+  askBattleAgain() {
+    const bt = this.#battleState;
+    if (!bt || bt.finished) return;
+    bt.paused = false;
+    bt.epoch += 1;
+    resumeBattleClock(bt.battle, this.#session.turn, Date.now());
+    const side = this.#session.turn;
+    const prompt =
+      bt.lastPrompts[side] ||
+      buildTurnPrompt(
+        this.#turnPromptContext({
+          aiColor: side,
+          opponentIsAi: true,
+          battleClock: {
+            remainingMs: battleRemainingMs(bt.battle.clock, side),
+            incrementSec: bt.battle.incrementSec,
+          },
+        }),
+      );
+    const requestId = `battle-${bt.epoch}-${++this.#battleCounter}`;
+    bt.pending = { side, requestId, prompt };
+    this.#message = "";
+    this.#render();
+    void this.#battleSend(side, prompt, requestId);
+  }
+
+  /** Abort: aborted-unfinished, NO ledger entry. */
+  abortBattle() {
+    const bt = this.#battleState;
+    if (!bt) return { ok: false };
+    if (bt.finished) {
+      void chrome.runtime.sendMessage(createMessage(MessageType.UNPIN_TAB, { slot: "opponent" }));
+      return { ok: true };
+    }
+    this.#battleFinish({ token: "*", reason: "aborted", winner: null }, { ledger: false });
+    this.#message = this.#t("battle.aborted");
+    this.#announce(this.#message);
+    this.#render();
+    return { ok: true };
+  }
+
+  /** Paired PGN export for the current battle — names both tabs. */
+  exportBattlePaired() {
+    const bt = this.#battleState;
+    if (!bt) return null;
+    const pgns = pairedPgns(bt.battle, this.#session);
+    return {
+      filename: `ai-chess-companion-battle-${new Date(bt.battle.createdAt).toISOString().slice(0, 10)}.pgn`,
+      text: `${pgns.w.trim()}\n\n${pgns.b.trim()}\n`,
+    };
+  }
+
+  /** Export all recorded battles (both perspectives each). */
+  exportBattlesAll() {
+    const lines = [];
+    for (const pair of Object.values(this.#battleLedger)) {
+      for (const item of pair?.history ?? []) {
+        if (item?.pgns?.w) lines.push(item.pgns.w.trim(), item.pgns.b.trim());
+      }
+    }
+    if (lines.length === 0) return null;
+    return {
+      filename: `ai-chess-companion-battles-${new Date().toISOString().slice(0, 10)}.pgn`,
+      text: `${lines.join("\n\n")}\n`,
+    };
+  }
+
+  /** @param {number} epoch */
+  #battleValid(epoch) {
+    return Boolean(this.#battleState && this.#battleState.epoch === epoch && !this.#battleState.finished);
+  }
+
+  #battleCancelOutstanding() {
+    const bt = this.#battleState;
+    if (!bt) return;
+    for (const side of ["w", "b"]) {
+      const tabId = bt.battle.sides[side]?.tabId;
+      if (tabId) {
+        chrome.tabs.sendMessage(tabId, createMessage(MessageType.CANCEL_REPLY)).catch(() => {});
+      }
+    }
+  }
+
+  async #battlePause(reasonText) {
+    const bt = this.#battleState;
+    if (!bt || bt.finished) return;
+    bt.paused = true;
+    bt.pauseReason = reasonText;
+    bt.epoch += 1;
+    this.#battleCancelOutstanding();
+    pauseBattleClock(bt.battle, Date.now());
+    bt.pending = null;
+    await this.#persistBattleSnapshot();
+    this.#message = reasonText;
+    this.#announce(this.#message);
+    this.#render();
+  }
+
+  #battleFinish(result, { ledger = true } = {}) {
+    const bt = this.#battleState;
+    if (!bt || bt.finished) return;
+    bt.battle.result = result;
+    bt.battle.status = "finished";
+    bt.battle.clock.running = null;
+    bt.finished = true;
+    bt.paused = false;
+    bt.pending = null;
+    bt.epoch += 1;
+    this.#battleCancelOutstanding();
+    if (this.#battleTimer) {
+      clearInterval(this.#battleTimer);
+      this.#battleTimer = null;
+    }
+    const clocksMs = { whiteMs: bt.battle.clock.whiteMs, blackMs: bt.battle.clock.blackMs };
+    if (ledger && result.reason !== "aborted") {
+      // Aborted-unfinished battles NEVER enter the ledger.
+      const entry = {
+        pairKey: battlePairKey(bt.battle.sides),
+        sides: bt.battle.sides,
+        result,
+        clocksMs,
+        date: new Date().toISOString(),
+        pgns: pairedPgns(bt.battle, this.#session),
+      };
+      this.#battleLedger = recordBattleResult(this.#battleLedger, entry);
+      void writeValue(BATTLE_LEDGER_KEY, this.#battleLedger);
+    }
+    void chrome.runtime.sendMessage(createMessage(MessageType.UNPIN_TAB, { slot: "opponent" }));
+    void removeValue(BATTLE_SNAPSHOT_KEY);
+    this.#message =
+      result.reason === "aborted"
+        ? this.#t("battle.aborted")
+        : this.#t("battle.finished", { result: result.token, reason: result.reason });
+    this.#announce(this.#message);
+    this.#render();
+  }
+
+  #battleFinishFromGame() {
+    const last = this.#session.lastMove;
+    const result = last?.mate
+      ? gameEndResult(last.color === "w" ? "1-0" : "0-1", last.color, "checkmate")
+      : gameEndResult("1/2-1/2", null, "draw");
+    this.#battleFinish(result);
+  }
+
+  #battleFinishOnFlag(flaggedSide) {
+    const bt = this.#battleState;
+    if (!bt || bt.finished) return;
+    this.#battleFinish(flagResult(bt.battle, flaggedSide));
+  }
+
+  #startBattleTicking() {
+    if (this.#battleTimer) clearInterval(this.#battleTimer);
+    this.#battleTimer = setInterval(() => {
+      const bt = this.#battleState;
+      if (!bt || bt.finished || bt.paused) return;
+      const { flaggedSide } = tickBattle(bt.battle, Date.now());
+      // Flag = LOSS immediately, even mid-send (epoch bump invalidates it).
+      if (flaggedSide) this.#battleFinishOnFlag(flaggedSide);
+    }, 250);
+  }
+
+  async #persistBattleSnapshot() {
+    const bt = this.#battleState;
+    if (!bt || bt.finished) return;
+    await writeValue(BATTLE_SNAPSHOT_KEY, serializeBattle(bt.battle, this.#session));
+  }
+
+  async #restoreBattleFromStorage() {
+    const value = await readValue(BATTLE_SNAPSHOT_KEY, null);
+    if (!value || typeof value !== "object" || !value.battle || !value.sessionSnapshot) return;
+    const restored = restoreBattle(value);
+    const mainColor = restored.battle.sides.w.slot === "main" ? "w" : "b";
+    this.#session = GameSession.fromSnapshot(restored.sessionSnapshot, { playerColor: mainColor });
+    this.#battleState = {
+      battle: restored.battle,
+      epoch: 1,
+      pending: null,
+      latency: null,
+      paused: true,
+      pauseReason: this.#t("battle.restored"),
+      finished: false,
+      moveSources: [...this.#session.history].map((m) => m.source),
+      lastPrompts: { w: null, b: null },
+    };
+    this.#message = this.#t("battle.restored");
+    this.#announce(this.#message);
+    this.#startBattleTicking();
+  }
+
+  #battleDispatch() {
+    const bt = this.#battleState;
+    if (!bt || bt.paused || bt.finished) return;
+    const session = this.#session;
+    if (session.isGameOver) return this.#battleFinishFromGame();
+    const adjudicated = adjudicateIfNeeded(bt.battle, session.plyCount);
+    if (adjudicated) return this.#battleFinish(adjudicated);
+    const side = session.turn;
+    const battleClock = {
+      remainingMs: battleRemainingMs(bt.battle.clock, side),
+      incrementSec: bt.battle.incrementSec,
+    };
+    const prompt = buildTurnPrompt(this.#turnPromptContext({ aiColor: side, opponentIsAi: true, battleClock }));
+    bt.lastPrompts[side] = prompt;
+    const requestId = `battle-${bt.epoch}-${++this.#battleCounter}`;
+    bt.pending = { side, requestId, prompt };
+    void this.#battleSend(side, prompt, requestId);
+  }
+
+  /**
+   * ONE submit per prompt per tab. Fail-closed on any delivery doubt: a battle
+   * PAUSES with per-side detail instead of continuing blind.
+   */
+  async #battleSend(side, prompt, requestId) {
+    const bt = this.#battleState;
+    if (!bt) return;
+    const epoch = bt.epoch;
+    const target = bt.battle.sides[side];
+    this.#latency.begin();
+    bt.latency = this.#latency;
+    this.#latency.mark("queued");
+    try {
+      await this.#ensureContentScript(target.tabId, target.url, target.platformId);
+    } catch {
+      // content injection can fail for privileged pages; the send surfaces it
+    }
+    this.#latency.mark("dispatched");
+    let response = null;
+    let threw = false;
+    try {
+      response = await chrome.tabs.sendMessage(
+        target.tabId,
+        createMessage(MessageType.SEND_CHESS_PROMPT, {
+          id: "battle-move",
+          requestId,
+          message: { prompt, expected: requestId, match: true },
+        }),
+      );
+    } catch {
+      threw = true;
+      response = { ok: false, error: "messaging failed" };
+    }
+    this.#latency.mark("submitted");
+    this.#latency.mergeExternal(response?.diagnostics?.stages);
+    if (!this.#battleValid(epoch)) return; // flag/abort/pause invalidated this send
+    // Battle is strict on delivery: ANY doubt pauses with per-side detail.
+    const envelope = normaliseResponse(response);
+    const unconfirmed = response?.unconfirmed === true || response?.result === "submit-unconfirmed";
+    const contradicted = response?.result === "cancelled" || response?.contradiction === true;
+    if (contradicted) {
+      return this.#battlePause(`${target.label}: ${this.#t("battle.deliveryContradicted")}`);
+    }
+    if (unconfirmed || response?.manual) {
+      return this.#battlePause(`${target.label}: ${this.#t("battle.deliveryUnconfirmed")}`);
+    }
+    if (!envelope.ok) {
+      const detail = envelope.error || (threw ? this.#t("battle.deliveryUnreachable") : "");
+      return this.#battlePause(`${target.label}: ${detail || this.#t("battle.deliveryFailed")}`);
+    }
+    return; // confirmed — one submit fired; the reply arrives via AI_MOVE
+  }
+
+  /** @returns {boolean} true when the payload was a battle reply and is handled. */
+  #handleBattleReply(payload, sender) {
+    const bt = this.#battleState;
+    if (!bt || bt.paused || bt.finished || !bt.pending) return false;
+    const { side, requestId } = bt.pending;
+    const target = bt.battle.sides[side];
+    // Strict routing: that side's tab + that side's request, nothing else.
+    if (sender?.tab?.id !== target.tabId || payload?.requestId !== requestId) return false;
+    this.#latency.mergeExternal(payload?.diagnostics?.stages);
+    this.#latency.mark("reply-detected");
+    if (payload?.type === MessageType.AI_NO_MOVE || !payload?.move) {
+      void this.#battleRetry(side, "", this.#t("battle.noMove"));
+      return true;
+    }
+    if (payload?.resigned) {
+      this.#battleFinish(resignationResult(side));
+      return true;
+    }
+    this.#latency.mark("parsed");
+    const candidates = normaliseCandidates(payload).map((uci) => ({ uci, san: "" }));
+    const result = this.#session.playBattleReply(candidates);
+    if (!result.ok) {
+      void this.#battleRetry(side, String(payload.move).slice(0, 120), result.error || this.#t("battle.illegal"));
+      return true;
+    }
+    bt.moveSources.push(result.play.source); // always "ai"
+    this.#latency.mark("accepted");
+    completeMove(bt.battle, side, Date.now());
+    bt.battle.retries[side] = 0;
+    bt.pending = null;
+    this.#render();
+    this.#latency.mark("rendered");
+    this.#latency.finish();
+    void this.#persistBattleSnapshot();
+    const adjudicated = adjudicateIfNeeded(bt.battle, this.#session.plyCount);
+    if (adjudicated) {
+      this.#battleFinish(adjudicated);
+      return true;
+    }
+    if (this.#session.isGameOver) {
+      this.#battleFinishFromGame();
+      return true;
+    }
+    void this.#battleDispatch();
+    return true;
+  }
+
+  /** Illegal/no-move: bounded per-side retries, then PAUSE — never fabricate. */
+  #battleRetry(side, rawMove, _reasonText) {
+    const bt = this.#battleState;
+    if (!bt || bt.paused || bt.finished) return;
+    const max = this.#settings.maxRetries ?? 3;
+    bt.battle.retries[side] = (bt.battle.retries[side] ?? 0) + 1;
+    if (bt.battle.retries[side] > max) {
+      void this.#battlePause(`${bt.battle.sides[side].label}: ${this.#t("battle.pausedIllegal", { count: max })}`);
+      return;
+    }
+    const cleaned = String(rawMove || "")
+      .trim()
+      .toLowerCase();
+    // An empty probe returns the authoritative legal UCI list without mutating.
+    const { legalUcis } = this.#session.playBattleReply([]);
+    const prompt = buildRetryPrompt({
+      fen: this.#session.fen,
+      uci: /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(cleaned) ? cleaned : "",
+      aiColor: side,
+      history: formatMoveList(this.#session.history, { maxPlies: 12 }),
+      legalMoves: legalUcis,
+      rejectedMoves: this.#session.rejectedMoves,
+      style: this.#settings.promptStyle,
+      funSentences: this.#settings.funCommentarySentences,
+      battleClock: {
+        remainingMs: battleRemainingMs(bt.battle.clock, side),
+        incrementSec: bt.battle.incrementSec,
+      },
+    });
+    bt.lastPrompts[side] = prompt;
+    const requestId = `battle-${bt.epoch}-${++this.#battleCounter}`;
+    bt.pending = { side, requestId, prompt };
+    void this.#battleSend(side, prompt, requestId);
+  }
+
+  /** Test hooks (same pattern as the pin-pause harness hooks). */
+  __battleState() {
+    const bt = this.#battleState;
+    if (!bt) return null;
+    return {
+      paused: bt.paused,
+      pauseReason: bt.pauseReason,
+      finished: bt.finished,
+      result: bt.battle.result,
+      status: bt.battle.status,
+      clock: { ...bt.battle.clock },
+      moveSources: [...bt.moveSources],
+      sessionSnapshot: this.#session.snapshot(),
+    };
+  }
+
+  __battleTest({ clock = {}, now = Date.now() } = {}) {
+    const bt = this.#battleState;
+    if (!bt) return null;
+    Object.assign(bt.battle.clock, clock);
+    const { flaggedSide } = tickBattle(bt.battle, now);
+    if (flaggedSide) this.#battleFinishOnFlag(flaggedSide);
+    return bt.battle;
+  }
+
+  #movePrompt() {
+    return buildTurnPrompt(this.#turnPromptContext());
   }
 
   #correctionPrompt(illegalMove, reason) {
@@ -1422,6 +2079,8 @@ export class App {
       reason,
       legalMoves: session.position.legalMoves().map(toUci),
       rejectedMoves: session.rejectedMoves,
+      style: this.#settings.promptStyle,
+      funSentences: this.#settings.funCommentarySentences,
     });
   }
 
@@ -1470,7 +2129,12 @@ export class App {
     }
   }
 
-  /** Serialize requests: even a fast AI reply cannot overlap two bridge sends. */
+  /**
+   * Serialize requests: even a fast AI reply cannot overlap two bridge sends.
+   * The only waits in this chain are correctness waits (a prior send must
+   * finish; `#cancelPending` must land before a new request starts) — never
+   * arbitrary delays.
+   */
   async #sendPrompt(prompt, options = {}) {
     const epoch = this.#retryEpoch;
     const session = this.#session;
@@ -1512,6 +2176,7 @@ export class App {
     try {
       // An earlier cancellation MUST arrive before this new request. Otherwise
       // its delayed CANCEL_REPLY could stop the new observer after it starts.
+      // This is a correctness-only wait (cancel-before-send), not a delay.
       await this.#cancelPending;
       if (epoch !== this.#retryEpoch || this.#settings.paused) return false;
 
@@ -1543,6 +2208,7 @@ export class App {
       requestId = ++this.#requestCounter;
       this.#expectedReplyId = requestId;
       this.#lastPrompt = prompt;
+      this.#latency.begin(); // stage: queued
       this.#phase = Phase.SENDING;
       this.#delivery = null;
       this.#clearWaitingReminder();
@@ -1554,6 +2220,7 @@ export class App {
 
       await this.#ensureContentScript(tabId, target.url, platformId);
       if (epoch !== this.#retryEpoch || this.#settings.paused || this.#connection.tabId !== tabId) return false;
+      this.#latency.mark("dispatched");
       const raw = await chrome.tabs.sendMessage(
         tabId,
         createMessage(MessageType.SEND_CHESS_PROMPT, {
@@ -1563,6 +2230,7 @@ export class App {
           rejectedMoves: this.#session.rejectedMoves,
         }),
       );
+      this.#latency.mergeExternal(raw?.diagnostics?.stages);
       // ---- Late-response guards -------------------------------------------
       // Every response (success, failure, unconfirmed) must prove it still
       // belongs to the LIVE request before touching the UI:
@@ -1933,6 +2601,50 @@ export class App {
     controls.pause?.addEventListener("click", () => void this.updateSettings({ paused: !this.#settings.paused }));
     controls.askAi.addEventListener("click", () => void this.requestAiMove());
     controls.copyPgn.addEventListener("click", () => void this.#copyPgn());
+
+    // ---- AI battle (unrated) ----
+    const battleRefs = this.#refs.battle;
+    battleRefs?.start?.addEventListener("click", () => {
+      const opponentTabId = Number(battleRefs.opponentTab?.value || 0);
+      const opponentColor = battleRefs.opponentColor?.value === "w" ? "w" : "b";
+      const minutesPerSide = Number(battleRefs.minutes?.value || this.#settings.battleMinutesPerSide);
+      const incrementSec = Number(battleRefs.increment?.value ?? this.#settings.battleIncrementSec);
+      void this.startBattle({ opponentTabId, opponentColor, minutesPerSide, incrementSec }).then(() =>
+        this.#renderBattle(),
+      );
+    });
+    battleRefs?.pause?.addEventListener("click", () => this.pauseBattle());
+    battleRefs?.resume?.addEventListener("click", () => this.resumeBattle());
+    battleRefs?.askAgain?.addEventListener("click", () => this.askBattleAgain());
+    battleRefs?.abort?.addEventListener("click", () => this.abortBattle());
+    battleRefs?.rematch?.addEventListener("click", () => void this.startRematch());
+    battleRefs?.export?.addEventListener("click", () => {
+      const out = this.exportBattlePaired();
+      if (out) this.#downloadText(out.text, out.filename);
+    });
+    battleRefs?.exportAll?.addEventListener("click", () => {
+      const out = this.exportBattlesAll();
+      if (out) this.#downloadText(out.text, out.filename);
+      else {
+        this.#message = this.#t("battle.empty");
+        this.#render();
+      }
+    });
+
+    // ---- Prompt Studio (progressive disclosure; zero network) ----
+    const studioRefs = this.#refs.studio;
+    studioRefs?.root?.addEventListener("toggle", () => this.#renderStudio());
+    studioRefs?.style?.addEventListener("change", () => this.#renderStudio());
+    studioRefs?.funSentences?.addEventListener("input", () => this.#renderStudio());
+    studioRefs?.copy?.addEventListener("click", () => {
+      const preview = this.studioPreview(this.#studioOverrides());
+      void this.#copyText(preview.text, this.#t("studio.copied"));
+    });
+
+    // ---- Latency timeline copy (redacted: stage deltas only) ----
+    this.#refs.diagnostics?.copyTimeline?.addEventListener("click", () => {
+      void this.#copyText(formatLatencyReport(this.#latency.entries), this.#t("timeline.copied"));
+    });
     controls.openPgn.addEventListener("click", () => this.#openPgnDialog());
     controls.copyFen.addEventListener(
       "click",
@@ -2057,6 +2769,7 @@ export class App {
         void this.updateSettings({ [key]: convert(event.target.value) });
       });
     numberSetting(settingsDialog.controls.maxRetries, "maxRetries");
+    numberSetting(settingsDialog.controls.funSentences, "funCommentarySentences");
     numberSetting(settingsDialog.controls.soundVolume, "soundVolume");
     numberSetting(settingsDialog.controls.clockDuration, "clockDurationMs", (minutes) => Number(minutes) * 60000);
     numberSetting(settingsDialog.controls.generationWait, "generationWaitMs", (seconds) => Number(seconds) * 1000);
@@ -2071,6 +2784,7 @@ export class App {
     enumSetting(settingsDialog.controls.boardOrientation, "boardOrientation");
     enumSetting(settingsDialog.controls.moveListFormat, "moveListFormat");
     enumSetting(settingsDialog.controls.moveInteraction, "moveInteraction");
+    enumSetting(settingsDialog.controls.promptStyle, "promptStyle");
     numberSetting(settingsDialog.controls.waitingReminder, "waitingReminderMs");
 
     for (const input of settingsDialog.controls.toggles) {
@@ -2183,6 +2897,18 @@ export class App {
         return;
       }
       if (message?.type === MessageType.ACTIVE_TAB_CHANGED) return; // focus never changes a pin
+      if (
+        message?.type === MessageType.AI_MOVE ||
+        (message?.type === MessageType.CONTENT_STATUS && message.state === "no-move")
+      ) {
+        // Battle replies are routed strictly per side (tab + requestId) inside;
+        // no-move verdicts arrive as CONTENT_STATUS and map to AI_NO_MOVE.
+        const battlePayload =
+          message.type === MessageType.CONTENT_STATUS
+            ? { ...message, type: MessageType.AI_NO_MOVE, move: null }
+            : message;
+        if (this.#handleBattleReply(battlePayload, sender)) return;
+      }
       if (message?.type !== MessageType.AI_MOVE && message?.type !== MessageType.CONTENT_STATUS) return;
       if (
         !this.#pin ||
@@ -2200,6 +2926,7 @@ export class App {
       }
       if (message.diagnostics) {
         this.#diagnostics = message.diagnostics;
+        this.#latency.mergeExternal(message.diagnostics.stages);
         this.#renderDiagnostics();
       }
       if (message.type === MessageType.AI_MOVE) {
@@ -2613,6 +3340,107 @@ export class App {
     }, 150);
   }
 
+  /** Battle section: truthful state, clocks, recovery actions, W-D-L history. */
+  #renderBattle() {
+    const battle = this.#refs.battle;
+    if (!battle?.root) return;
+    const bt = this.#battleState;
+    const running = Boolean(bt && !bt.finished && !bt.paused);
+    const paused = Boolean(bt && !bt.finished && bt.paused);
+    if (battle.status) {
+      if (!bt) battle.status.textContent = "";
+      else if (bt.finished) {
+        battle.status.textContent = this.#t("battle.finished", {
+          result: bt.battle.result?.token ?? "*",
+          reason: bt.battle.result?.reason ?? "",
+        });
+      } else if (paused) battle.status.textContent = bt.pauseReason;
+      else {
+        const sides = bt.battle.sides;
+        battle.status.textContent = `${sides.w.label} ${formatClock(battleRemainingMs(bt.battle.clock, "w"))} — ${sides.b.label} ${formatClock(battleRemainingMs(bt.battle.clock, "b"))}`;
+      }
+    }
+    if (battle.start) battle.start.disabled = Boolean(bt && !bt.finished);
+    if (battle.pause) battle.pause.disabled = !running;
+    if (battle.resume) battle.resume.disabled = !paused;
+    if (battle.askAgain) battle.askAgain.disabled = !paused;
+    if (battle.abort) battle.abort.disabled = !bt || bt.finished;
+    if (battle.rematch) battle.rematch.disabled = !bt;
+    if (battle.export) battle.export.disabled = !bt;
+    if (battle.exportAll) battle.exportAll.disabled = Object.keys(this.#battleLedger).length === 0;
+    this.#renderBattleHistory();
+  }
+
+  #renderBattleHistory() {
+    const battle = this.#refs.battle;
+    if (!battle?.root) return;
+    const pairs = Object.entries(this.#battleLedger);
+    if (battle.ledger) {
+      battle.ledger.textContent =
+        pairs
+          .map(([, pair]) =>
+            this.#t("battle.wdl", {
+              white: pair.sides.w.label,
+              black: pair.sides.b.label,
+              w: pair.whiteWins,
+              d: pair.draws,
+              l: pair.blackWins,
+            }),
+          )
+          .join("\n") || this.#t("battle.empty");
+    }
+    if (battle.history) {
+      const rows = [];
+      for (const [, pair] of pairs) {
+        for (const item of pair.history ?? []) {
+          rows.push(`${item.date.slice(0, 10)} · ${item.result.token} (${item.result.reason})`);
+        }
+      }
+      battle.history.textContent = rows.join("\n");
+    }
+  }
+
+  /** Latency timeline (Diagnostics): stage deltas only — never content. */
+  #renderTimeline() {
+    const refs = this.#refs.diagnostics;
+    if (!refs?.timeline) return;
+    const entries = this.#latency.entries;
+    const rows = entries.map((entry, index) =>
+      this.#t("timeline.moveLabel", { n: index + 1, total: Math.round(entry.totalMs) }),
+    );
+    refs.timeline.textContent = rows.join("\n") || this.#t("timeline.empty");
+  }
+
+  #studioOverrides() {
+    const studio = this.#refs.studio;
+    const style = studio?.style?.value || this.#settings.promptStyle;
+    const funSentences = Number(studio?.funSentences?.value || this.#settings.funCommentarySentences);
+    const bt = this.#battleState;
+    const battleClock =
+      bt && !bt.finished
+        ? {
+            remainingMs: battleRemainingMs(bt.battle.clock, this.#session.turn),
+            incrementSec: bt.battle.incrementSec,
+          }
+        : null;
+    return { style, funSentences, battleClock };
+  }
+
+  /** Prompt Studio: rendered only when the section is opened (progressive disclosure). */
+  #renderStudio() {
+    const studio = this.#refs.studio;
+    if (!studio?.root || studio.root.open === false) return;
+    const overrides = this.#studioOverrides();
+    if (studio.funRow) studio.funRow.hidden = overrides.style !== "fun";
+    const preview = this.studioPreview(overrides);
+    if (studio.platform) {
+      studio.platform.textContent = this.#t("studio.platform", { label: preview.platformLabel || "—" });
+    }
+    if (studio.metrics) studio.metrics.textContent = this.#t("studio.metrics", preview.metrics);
+    if (studio.budgetHint) studio.budgetHint.hidden = !preview.metrics.overBudget;
+    if (studio.preview) studio.preview.textContent = preview.text;
+  }
+
   #render() {
     const status = this.#status();
     const session = this.#session;
@@ -2712,6 +3540,8 @@ export class App {
     this.#renderClock();
     this.#renderDiagnostics();
     this.#renderMatch();
+    this.#renderBattle();
+    this.#renderTimeline();
 
     // FEN status
     if (this.#refs.fenStatus) {
@@ -2727,8 +3557,8 @@ export class App {
   #renderPlayMeta() {
     const t = this.#t;
     const session = this.#session;
-    const chip = document.getElementById("pin-chip");
-    const chipText = document.getElementById("pin-chip-text");
+    const chip = this.#el("pin-chip");
+    const chipText = this.#el("pin-chip-text");
     if (chip && chipText) {
       chipText.textContent = this.#pin
         ? t("chip.pinned", {
@@ -2739,12 +3569,12 @@ export class App {
       chip.classList.toggle("is-pinned", Boolean(this.#pin));
       chip.classList.toggle("is-empty", !this.#pin);
     }
-    const sideLine = document.getElementById("side-line");
+    const sideLine = this.#el("side-line");
     if (sideLine) {
       const colorName = t(session.playerColor === "w" ? "clock.white" : "clock.black");
       sideLine.textContent = t("play.youPlay", { color: colorName });
     }
-    const preview = document.getElementById("moves-preview");
+    const preview = this.#el("moves-preview");
     if (preview) {
       if (session.plyCount === 0) {
         preview.textContent = t("moves.empty");
@@ -2758,7 +3588,7 @@ export class App {
         preview.textContent = raw.length > 96 ? `… ${raw.slice(-95)}` : raw;
       }
     }
-    const rated = document.getElementById("rated-banner");
+    const rated = this.#el("rated-banner");
     if (rated) {
       rated.hidden = !this.#match;
       if (this.#match) {
@@ -2769,8 +3599,8 @@ export class App {
         });
       }
     }
-    const what = document.getElementById("what-happened");
-    const whatDetail = document.getElementById("what-happened-detail");
+    const what = this.#el("what-happened");
+    const whatDetail = this.#el("what-happened-detail");
     if (what) what.hidden = !this.#delivery;
     if (whatDetail) whatDetail.textContent = describeDelivery(this.#delivery, t);
   }
@@ -2830,6 +3660,9 @@ export class App {
     if (settingsDialog.controls.engineLevel) settingsDialog.controls.engineLevel.value = String(this.#engineLevel);
     if (this.#refs.analysis?.level) this.#refs.analysis.level.value = String(this.#engineLevel);
     if (settingsDialog.controls.sendMode) settingsDialog.controls.sendMode.value = this.#settings.sendMode;
+    if (settingsDialog.controls.promptStyle) settingsDialog.controls.promptStyle.value = this.#settings.promptStyle;
+    if (settingsDialog.controls.funSentences)
+      settingsDialog.controls.funSentences.value = String(this.#settings.funCommentarySentences);
     if (settingsDialog.controls.maxRetries)
       settingsDialog.controls.maxRetries.value = String(this.#settings.maxRetries);
     if (settingsDialog.controls.generationWait)
@@ -3265,10 +4098,7 @@ export class App {
       return;
     }
     if (session.turn === match.aiColor) {
-      const prompt =
-        session.plyCount === 0
-          ? buildOpeningPrompt({ aiColor: session.aiColor, fen: session.fen })
-          : this.#movePrompt();
+      const prompt = buildTurnPrompt(this.#turnPromptContext());
       const sent = await this.#sendPrompt(prompt, { expected: "rated-ai-move", match: true });
       if (!sent && this.#match === match) this.#abortMatch(this.#t("match.unratedProtocol"));
       return;
@@ -3294,9 +4124,11 @@ export class App {
       if (!result.ok) throw new Error("Stockfish move rejected by the chess rules engine.");
       match.stockfishMoves += 1;
       this.#persist();
-      this.#updateBadge();
-      this.#playSoundForMove(result.entry);
-      this.#updateClockAfterMove();
+      this.#updateClockAfterMove(); // clock state is correctness-critical
+      scheduleOffPath(() => {
+        this.#updateBadge();
+        this.#playSoundForMove(result.entry);
+      });
       this.#render();
       if (session.outcome.over) await this.#finishMatch(session.outcome.result, session.outcome.reason);
       else await this.#advanceMatch();

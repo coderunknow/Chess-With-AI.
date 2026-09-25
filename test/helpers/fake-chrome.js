@@ -57,15 +57,16 @@ export function installFakeChrome({
       for (const handler of listeners.get("runtime") || []) handler(message, sender, respond);
       if (!replied && (listeners.get("runtime") || []).length === 0) resolve(undefined);
     });
-  const pinRecord = () => state.sessionData.pinnedAiTab ?? state.storageData.pinnedAiTab ?? null;
-  const livePin = () => {
-    const pin = pinRecord();
+  const pinKey = (slot) => (slot === "opponent" ? "pinnedOpponentAiTab" : "pinnedAiTab");
+  const pinRecord = (slot) => state.sessionData[pinKey(slot)] ?? state.storageData[pinKey(slot)] ?? null;
+  const livePin = (slot) => {
+    const pin = pinRecord(slot);
     const tab = state.tabs.find((entry) => entry.id === pin?.tabId);
     const platform = platformForUrl(tab?.url);
     if (!pin || !platform || platform.id !== pin.platformId) {
       if (pin) {
-        delete state.sessionData.pinnedAiTab;
-        delete state.storageData.pinnedAiTab;
+        delete state.sessionData[pinKey(slot)];
+        delete state.storageData[pinKey(slot)];
       }
       return null;
     }
@@ -98,7 +99,7 @@ export function installFakeChrome({
         state.runtimeMessages.push(message);
         switch (message?.type) {
           case "GET_ACTIVE_TAB": {
-            const pin = livePin();
+            const pin = livePin(message.slot);
             return pin
               ? {
                   ok: true,
@@ -114,7 +115,7 @@ export function installFakeChrome({
           case "GET_CONNECTIONS":
             return {
               ok: true,
-              pin: livePin(),
+              pin: livePin(message.slot),
               tabs: state.tabs
                 .filter((tab) => platformForUrl(tab.url))
                 .map((tab) => ({
@@ -130,16 +131,16 @@ export function installFakeChrome({
             const tab = state.tabs.find((entry) => entry.id === message.tabId);
             const platform = platformForUrl(tab?.url);
             if (!platform) return { ok: false };
-            state.sessionData.pinnedAiTab = {
+            state.sessionData[pinKey(message.slot)] = {
               tabId: tab.id,
               url: tab.url,
               platformId: platform.id,
               title: tab.titleFromContent || "",
             };
-            return { ok: true, pin: state.sessionData.pinnedAiTab };
+            return { ok: true, pin: state.sessionData[pinKey(message.slot)] };
           }
           case "UNPIN_TAB":
-            delete state.sessionData.pinnedAiTab;
+            delete state.sessionData[pinKey(message.slot)];
             return { ok: true };
           default:
             return undefined;

@@ -306,6 +306,53 @@ export class GameSession {
   }
 
   /**
+   * Applies one battle reply. In a battle EITHER side's tab may move and every
+   * battle ply is an AI ply (`source: "ai"`) — the local engine NEVER plays a
+   * move in battle. Strict mirror of `playFirstAvailable` without the
+   * player-turn side effect: the first legal candidate wins (the one-parse
+   * contract), illegal-only replies change nothing, and rejected labels clear
+   * only on success (echo protection).
+   *
+   * @param {ReadonlyArray<{uci: string, san?: string}>} candidates
+   * @returns {{ok: boolean, play: object|null, error: string, legalUcis: string[], turn: string, position: string}}
+   */
+  playBattleReply(candidates) {
+    const legalUcis = this.#position.legalMoves().map((m) => toUci(m));
+    const legalSet = new Set(legalUcis);
+    const done = (/** @type {boolean} */ ok, /** @type {any} */ play, /** @type {string} */ error) => ({
+      ok,
+      play,
+      error,
+      legalUcis,
+      turn: this.turn,
+      position: this.fen,
+    });
+    if (this.isGameOver) {
+      return done(false, null, "The game is already over.");
+    }
+    let lastError = "The AI did not send a usable move.";
+    for (const candidate of candidates) {
+      const uci = String(candidate?.uci ?? "")
+        .trim()
+        .toLowerCase();
+      if (!uci || this.#rejectedMoves.has(uci) || !legalSet.has(uci)) {
+        continue;
+      }
+      const result = this.#play(uci, MoveSource.AI);
+      if (result.ok) {
+        return done(true, result.entry, "");
+      }
+      if (result.code === MoveError.ILLEGAL) {
+        this.#rejectedMoves.add(uci);
+        lastError = result.error;
+        continue;
+      }
+      return done(false, null, result.error);
+    }
+    return done(false, null, lastError);
+  }
+
+  /**
    * Records that a retry prompt was sent to the AI.
    *
    * @returns {number} the new retry count.

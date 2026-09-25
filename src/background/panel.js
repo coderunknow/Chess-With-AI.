@@ -55,8 +55,8 @@ export async function getActiveTab() {
   }
 }
 
-export async function getPinnedConnection() {
-  const pin = await resolvePin();
+export async function getPinnedConnection({ slot = undefined } = {}) {
+  const pin = await resolvePin({ ...(slot ? { slot } : {}) });
   if (!pin) return { supported: false, tabId: null, url: "", platform: "", title: "" };
   return { supported: true, tabId: pin.tabId, url: pin.url, platform: pin.platformId, title: pin.title, pinned: true };
 }
