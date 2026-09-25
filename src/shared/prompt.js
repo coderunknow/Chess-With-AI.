@@ -28,6 +28,14 @@ export const AI_MOVE_PATTERN = /\[([a-h][1-8][a-h][1-8][qrbn]?)\]/gi;
 /** Bare UCI move, e.g. `g8f6` (used as a documented fallback). */
 const BARE_MOVE_PATTERN = /\b([a-h][1-8][a-h][1-8][qrbn]?)\b/gi;
 
+/**
+ * Reply-visibility contract (v0.7.2, every prompt variant): the move must be
+ * SHOWN in the chat as plain text. Moves hidden in code blocks, canvases or
+ * "thinking" panels are what the observer cannot read — the AI answered, yet
+ * the board never moved.
+ */
+export const REPLY_VISIBILITY_LINE = "Show the move in your visible chat reply as plain text, not in a code block.";
+
 /** Extra instruction appended when the AI answered with an illegal move. */
 export const RETRY_INSTRUCTION =
   "Your previous answer was not a legal move. Reply with exactly one legal move for the side to move, inside square brackets, for example [g8f6].";
@@ -169,9 +177,11 @@ function funTail(funSentences) {
     FUN_SENTENCES_MIN,
     Math.min(FUN_SENTENCES_MAX, Math.round(Number(funSentences) || DEFAULT_FUN_SENTENCES)),
   );
+  // One line (v0.7.2): same contract — move first, fun commentary after, no
+  // square brackets in it — in fewer characters, so fun prompts keep the new
+  // side-to-move / visibility context within the ~800-char budget.
   return [
-    `After the move, add ${n} short witty sentence${n === 1 ? "" : "s"} of commentary about the move or position.`,
-    "Keep the commentary fun and do not use square brackets in it.",
+    `After the move, add ${n} short witty sentence${n === 1 ? "" : "s"} of fun commentary, without square brackets.`,
   ];
 }
 
@@ -219,6 +229,7 @@ export function buildMovePrompt({
       opponentIsAi ? `Your opponent is another AI playing ${humanName}.` : `The human plays ${humanName}.`
     }`,
     `Position (FEN): ${fen}`,
+    `Side to move: ${sideName}.`,
   ];
 
   if (history) {
@@ -233,16 +244,19 @@ export function buildMovePrompt({
   if (style === PROMPT_STYLES.EFFICIENT) {
     // Minimal output: the chosen move only, in the existing UCI-in-brackets format.
     lines.push(
-      "Reply with only that move in coordinate notation inside square brackets, for example [g8f6]. No commentary or extra text.",
+      "Reply with only that move in coordinate notation inside square brackets, for example [g8f6] or [e7e8q] for a promotion. No commentary or extra text.",
     );
   } else if (style === PROMPT_STYLES.CONCISE) {
-    lines.push("Reply with one bracketed coordinate move, for example [g8f6]. Put it first; no other move.");
+    lines.push(
+      "Reply with one bracketed coordinate move, for example [g8f6] or [e7e8q] for a promotion. Put it first; no other move.",
+    );
   } else {
     lines.push(
       "Reply with that move in square brackets using coordinate notation, for example [g8f6] or [e7e8q] for a promotion.",
       "Put the bracketed move first. Do not mention any other move.",
     );
   }
+  lines.push(REPLY_VISIBILITY_LINE);
   appendContextTail(lines, { style, funSentences, battleClock, extraInstruction });
 
   return lines.join("\n");
@@ -276,9 +290,13 @@ export function buildOpeningPrompt({
       ? `Let's play chess. You are ${sideName}; your opponent is another AI playing ${opponentName}.`
       : `Let's play chess. You are ${sideName} and I am ${opponentName}.`,
     `Starting position (FEN): ${fen}`,
+    `Side to move: ${sideName}.`,
     "On every turn answer with exactly one legal move in square brackets using coordinate notation, for example [e2e4].",
     "Never answer with more than one bracketed move.",
     "Check that every move is legal in the position before answering.",
+    // A protocol-only opener invited "Ready when you are!" — no move, no board update.
+    `It is your move now: reply with your first move for ${sideName} (promotion like [e7e8q]).`,
+    REPLY_VISIBILITY_LINE,
   ];
   if (style === PROMPT_STYLES.EFFICIENT) {
     lines.push("Reply with only the bracketed move each turn. No commentary or extra text.");
@@ -322,6 +340,7 @@ export function buildRetryPrompt({
     `Previously rejected UCIs (do not repeat): ${rejectedMoves.map(hyphenated).join(", ") || "none"}.`,
     `Play a legal move for ${sideName} now.`,
     "Reply with exactly one bracketed coordinate move. Put the bracketed move first. No second bracketed move.",
+    REPLY_VISIBILITY_LINE,
   ];
   if (style === PROMPT_STYLES.EFFICIENT) {
     suffixLines.push("Reply with only the bracketed move. No commentary or extra text.");
