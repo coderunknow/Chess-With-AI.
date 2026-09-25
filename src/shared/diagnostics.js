@@ -32,6 +32,18 @@
  * @property {string} typingMethod
  * @property {string} submitMethod
  * @property {Record<string, number>} stages privacy-safe stage timestamps (latency timeline).
+ * @property {ReplyPath} reply privacy-safe reply-path codes (v0.7.2).
+ */
+
+/**
+ * Reply-path codes: what happened to the assistant's answer on the content
+ * side. Codes and counters only — never message text, FENs or titles.
+ *
+ * @typedef {object} ReplyPath
+ * @property {''|'confirmed'|'echo'|'reply'|'manual'} attribution how the reply was tied to the request.
+ * @property {''|'move'|'no-move'|'repeated'|'resigned'} outcome the verdict handed to the panel.
+ * @property {number} echoSkipped containers skipped because they were our own prompt.
+ * @property {boolean} refilled the answer arrived in a pre-existing (placeholder / re-used) container.
  */
 
 /**
@@ -59,6 +71,7 @@ export function createEmptyReport({ platform = "", url = "" } = {}) {
     typingMethod: "",
     submitMethod: "",
     stages: {},
+    reply: { attribution: "", outcome: "", echoSkipped: 0, refilled: false },
   };
 }
 
@@ -88,6 +101,7 @@ export function formatReport(report) {
         .map(([stage, at]) => `${stage}=${at}`)
         .join(" ") || "none"
     }`,
+    `Reply path: attribution=${report.reply?.attribution || "none"} outcome=${report.reply?.outcome || "none"} echo-skipped=${Number(report.reply?.echoSkipped) || 0} refilled=${Boolean(report.reply?.refilled)}`,
     ``,
   ];
 
@@ -188,6 +202,16 @@ export class DiagnosticsCollector {
     if (typeof at !== "number" || !Number.isFinite(at)) return;
     if (Object.hasOwn(this.#report.stages, stage)) return;
     this.#report.stages[stage] = at;
+  }
+
+  /**
+   * Merges reply-path codes. Replace-on-write, so a report snapshot already
+   * handed to the panel never changes underneath it.
+   *
+   * @param {Partial<ReplyPath>} fields
+   */
+  setReply(fields) {
+    this.#report.reply = { ...this.#report.reply, ...fields };
   }
 
   /** @param {string} platform */

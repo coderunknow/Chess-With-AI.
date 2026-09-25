@@ -58,13 +58,45 @@ export function extractBracketedMoves(text) {
  * Extracts bracketed moves and, when none are present, bare UCI tokens.
  *
  * @param {unknown} text
+ * @param {object} [options]
+ * @param {boolean} [options.allowBare] false disables the bare-UCI fallback (streaming text).
  * @returns {string[]} unique, normalised UCI moves, first occurrence first.
  */
-export function extractMoveCandidates(text) {
+export function extractMoveCandidates(text, { allowBare = true } = {}) {
   if (typeof text !== "string" || isPromptShaped(text)) return [];
   const bracketed = extractBracketedMoves(text);
   // A quoted legal-move list is not an AI answer, even if it has a bare UCI.
-  return bracketed.length > 0 ? bracketed : extract(text, BARE_MOVE_PATTERN);
+  // `allowBare: false` is used while a reply is still streaming: a token such
+  // as `[e7e8` (before `q]` arrives) must never be read as the bare `e7e8`.
+  if (bracketed.length > 0 || !allowBare) return bracketed;
+  return extract(text, BARE_MOVE_PATTERN);
+}
+
+/**
+ * Removes a VERBATIM copy of one of our own prompts from a reply container's
+ * text (hosts that wrap the user turn and the answer together, or an AI that
+ * quotes the whole request before answering). Only an exact, complete,
+ * whitespace-normalised copy is removed — partial quotes are left alone and
+ * stay prompt-shaped, so they can never become a move.
+ *
+ * @param {string} text normalised reply text.
+ * @param {ReadonlyArray<string>} prompts prompts we sent (newest last).
+ * @returns {{text: string, stripped: boolean}} the remainder.
+ */
+export function stripPromptEcho(text, prompts) {
+  if (typeof text !== "string" || !Array.isArray(prompts)) return { text: String(text ?? ""), stripped: false };
+  const collapse = (value) => String(value).replace(/\s+/g, " ").trim();
+  let haystack = collapse(text);
+  let stripped = false;
+  for (const prompt of [...prompts].reverse()) {
+    const needle = collapse(prompt);
+    if (needle.length < 20) continue;
+    const at = haystack.indexOf(needle);
+    if (at === -1) continue;
+    haystack = collapse(`${haystack.slice(0, at)} ${haystack.slice(at + needle.length)}`);
+    stripped = true;
+  }
+  return { text: stripped ? haystack : text, stripped };
 }
 
 /**
