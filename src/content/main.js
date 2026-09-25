@@ -94,6 +94,7 @@ export function start() {
       if (paused || !awaitingEchoGate) return;
       awaitingEchoGate = false;
       deliveryReady = true;
+      diagnostics.markStage("echo-observed");
       notifyPanel({ state: STATUS.PROMPT_ECHOED, requestId: currentRequestId, platform: platform?.id || "" });
       if (queuedReply) {
         const reply = queuedReply;

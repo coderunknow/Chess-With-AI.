@@ -153,10 +153,80 @@ test("every new setting label exists in both locales", () => {
     "controls.confirmReplaceGame",
     "match.ratedSection",
     "match.banner",
+    "settings.responseStyle",
+    "settings.styleStandard",
+    "settings.styleConcise",
+    "settings.styleEfficient",
+    "settings.styleFun",
+    "settings.funSentences",
+    "settings.funSentencesHint",
   ];
   for (const key of keys) {
     assert.ok(en[key], `missing en: ${key}`);
     assert.ok(vi[key], `missing vi: ${key}`);
     assert.ok(String(vi[key]).trim().length > 0, `empty vi: ${key}`);
   }
+});
+
+test("v0.7 response-style and battle settings ship with bounded defaults", () => {
+  assert.equal(DEFAULT_SETTINGS.promptStyle, "standard");
+  assert.equal(DEFAULT_SETTINGS.funCommentarySentences, 2);
+  assert.equal(DEFAULT_SETTINGS.battleMinutesPerSide, 5);
+  assert.equal(DEFAULT_SETTINGS.battleIncrementSec, 0);
+  assert.equal(DEFAULT_SETTINGS.battleMaxPlies, 200);
+
+  const fresh = normaliseSettings(undefined);
+  assert.equal(fresh.promptStyle, "standard");
+  assert.equal(fresh.funCommentarySentences, 2);
+  assert.equal(fresh.battleMinutesPerSide, 5);
+  assert.equal(fresh.battleIncrementSec, 0);
+  assert.equal(fresh.battleMaxPlies, 200);
+});
+
+test("corrupt v0.7 values repair to safe bounds, never throw", () => {
+  const repaired = normaliseSettings({
+    promptStyle: "telepathy",
+    funCommentarySentences: 99,
+    battleMinutesPerSide: 10000,
+    battleIncrementSec: 7,
+    battleMaxPlies: -3,
+  });
+  assert.equal(repaired.promptStyle, "standard");
+  assert.equal(repaired.funCommentarySentences, 2, "the slider clamps to its 1–2 range");
+  assert.equal(repaired.battleMinutesPerSide, 60, "bounded to 1–60 minutes");
+  assert.equal(repaired.battleIncrementSec, 0, "only 0/2/3/5 are real increments");
+  assert.equal(repaired.battleMaxPlies, 20, "bounded adjudication limit");
+  assert.equal(normaliseSettings({ funCommentarySentences: "x" }).funCommentarySentences, 2);
+  assert.equal(normaliseSettings({ battleIncrementSec: 2 }).battleIncrementSec, 2);
+  assert.equal(normaliseSettings({ battleMinutesPerSide: 1 }).battleMinutesPerSide, 1);
+});
+
+test("old v0.6 storage keeps its values while v0.7 keys gain defaults", () => {
+  const oldSnapshot = { locale: "vi", promptStyle: undefined, battleMinutesPerSide: null, paused: true };
+  const merged = mergeSettings(oldSnapshot);
+  assert.equal(merged.locale, "vi");
+  assert.equal(merged.paused, true);
+  assert.equal(merged.promptStyle, "standard");
+  assert.equal(merged.battleMinutesPerSide, 5);
+  const patched = mergeSettings({ promptStyle: "fun", funCommentarySentences: 1, battleMinutesPerSide: 3 }, merged);
+  assert.equal(patched.promptStyle, "fun");
+  assert.equal(patched.funCommentarySentences, 1);
+  assert.equal(patched.battleMinutesPerSide, 3);
+  assert.equal(patched.locale, "vi", "a patch never disturbs unrelated keys");
+});
+
+test("reset-to-defaults restores every v0.7 key", () => {
+  const custom = mergeSettings({
+    promptStyle: "efficient",
+    funCommentarySentences: 1,
+    battleMinutesPerSide: 15,
+    battleIncrementSec: 5,
+    battleMaxPlies: 400,
+  });
+  const reset = mergeSettings(DEFAULT_SETTINGS, custom);
+  assert.equal(reset.promptStyle, DEFAULT_SETTINGS.promptStyle);
+  assert.equal(reset.funCommentarySentences, DEFAULT_SETTINGS.funCommentarySentences);
+  assert.equal(reset.battleMinutesPerSide, DEFAULT_SETTINGS.battleMinutesPerSide);
+  assert.equal(reset.battleIncrementSec, DEFAULT_SETTINGS.battleIncrementSec);
+  assert.equal(reset.battleMaxPlies, DEFAULT_SETTINGS.battleMaxPlies);
 });

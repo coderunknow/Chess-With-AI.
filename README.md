@@ -2,7 +2,7 @@
 
 > Play chess with Gemini, ChatGPT, Claude, Grok, Perplexity or Copilot in Chrome's side panel.
 
-**v0.6.0** is a zero-build Manifest V3 extension. You play one colour and the AI in your **pinned** chat plays the other. The local chess rules engine validates every move (including castling, en passant, promotion, checks and draws). The extension sends a FEN-based request to that one chat and reads the AI's _new_ reply. No account, API key, backend, analytics or telemetry is required.
+**v0.7.0** is a zero-build Manifest V3 extension. You play one colour and the AI in your **pinned** chat plays the other. The local chess rules engine validates every move (including castling, en passant, promotion, checks and draws). The extension sends a FEN-based request to that one chat and reads the AI's _new_ reply. No account, API key, backend, analytics or telemetry is required.
 
 ## Features
 
@@ -13,6 +13,9 @@
 - **Your choice of side:** **Play Black / Play White** next to Flip starts a _new_ game (confirmation if moves exist). Black flips the board. There is no mid-game colour swap.
 - **Soft Pause / Resume:** Pause stops the transcript observer and both workers while leaving the content script installed; toolbar badge `OFF` wins over turn/check badges. Pause persists across service-worker restarts. Closing the panel does not auto-pause.
 - **Games and analysis:** local snapshot, PGN import/export, game library, optional clock (default 5 minutes per side), synthesized wood knocks (off by default, volume adjustable), Hint / Analyse / local Play vs engine at **heuristic levels 1–8**. These levels have **no calibrated Elo**.
+- **AI Battle (unrated):** pin your chat as usual, then let a second **battle-only opponent slot** play it in a full clocked game (default 5+0, 1–60 min, increments 0/2/3/5 s). Both AIs get their remaining time in the prompt. Illegal replies are retried a bounded number of times per side and then the battle **pauses** with **Ask again / Abort / Export** — a move is never fabricated. Unfinished battles leave no ledger entry; results cover checkmate, resignation, flag, draw and adjudicated draws at the ply limit. A W–D–L ledger per tab-pair, one-click rematch and paired PGN export are included. **Battles are unrated** and never touch rated match records.
+- **Efficient & Fun response styles:** Efficient returns only the bracketed UCI move; Fun adds 1–2 slider-controlled witty sentences after the move — the move parsing and chess logic are identical in every style.
+- **Prompt Studio & Latency Timeline:** see the exact prompt the extension sends (with platform, style toggle, char/line count and budget warning) and per-move stage timings (ms deltas only — never message text) under Diagnostics. Both are strictly local.
 - **Rated Stockfish match:** the **vendored Stockfish.js 17.1 Lite single-threaded NNUE WASM** plays real chess moves against the AI in the pinned tab. Match settings use `UCI_LimitStrength true`, the binary's own `UCI_Elo` range and `go movetime`; no Skill Level/depth-to-Elo conversion. The model's legal replies must come from that pinned tab. Only completed chess outcomes or a parsed resignation after both sides have played count. Unfinished games, protocol errors, pause or Stop never count as losses. Each anchor has its own **game count, W–D–L, bounded maximum-likelihood estimate and 95% interval**; small or wide-interval samples say **provisional**. **Stockfish UCI_Elo scale, not FIDE** (nor a website rating).
 
 ## Install (no compile step)

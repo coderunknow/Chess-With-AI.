@@ -1,10 +1,10 @@
 # Privacy Policy for AI Chess Companion
 
-**Effective Date:** September 24, 2026
+**Effective Date:** September 25, 2026
 
 **Extension Name:** AI Chess Companion (Chess With AI)
 
-**Version:** 0.6.0
+**Version:** 0.7.0
 
 ## Summary
 
@@ -16,12 +16,14 @@
 - The picker **lists open supported AI tabs only**. Their URLs identify the host; their `document.title` is read from their content scripts for display. You explicitly **pin one tab**, which is the only destination for chess prompts; changing window focus cannot move the pin. If the tab closes or leaves a supported host, the pin is cleared and no new chat is silently selected.
 - The content script on the **pinned AI tab** locates its composer, reads new user/assistant message containers and validates a move from a new assistant reply. An old transcript or an echoed prompt cannot become a move. When paused, its observer disconnects; the script stays injected but idle. Closing the panel does not automatically pause it.
 - **Auto** mode types a FEN/move/retry prompt into that chat and submits it once only after generation stops and the full prompt is verified. **Manual** mode only copies/offers the prompt; you paste and send it yourself. If a send cannot be confirmed, nothing is resubmitted automatically.
+- AI Battles send the same kind of chess prompts to **two pinned AI tabs** (your usual pin plus a battle-only opponent slot). Each prompt includes that side's remaining clock time. Battle results and a per-pair W–D–L ledger stay in local storage; battles are unrated. The battle prompt is visible in Prompt Studio before any send.
+- The Latency Timeline stores **stage timestamps as millisecond deltas only** (queued → rendered) for the last ~20 accepted moves. It never stores message text, FENs or titles, and its copy action exports the same redacted data.
 - Rated games use a packaged Stockfish worker, never an external rating service. Completed match PGNs, the Stockfish anchor, AI colour, outcome and platform ID support a local estimate on the **Stockfish UCI_Elo scale, not FIDE**.
 
 ## Data stored on your device
 
 - `chrome.storage.local`: validated settings (including send mode and pause), the in-progress chess snapshot, the game library, and a separate versioned rated-match record containing PGNs and results. Imported PGNs and chess prompts can contain text you provided; stored data is not uploaded by the extension.
-- `chrome.storage.session`, if available: `{tabId, url, platformId, title}` for **one pinned AI tab**. On browsers without session storage the pin falls back to `chrome.storage.local`. URLs and titles can include information about your own chats and stay on your device. This is **not** browsing-history collection.
+- `chrome.storage.session`, if available: `{tabId, url, platformId, title}` for **one pinned AI tab** (plus a battle-only opponent slot while an AI battle runs). On browsers without session storage the pin falls back to `chrome.storage.local`. URLs and titles can include information about your own chats and stay on your device. This is **not** browsing-history collection.
 - There are no cookies, ad IDs, tracking pixels or remote backups. Turning off **Remember the game** removes the running-game snapshot, not the separate match PGNs; use the Match export to save them yourself. Pause remains persisted until you resume.
 
 ## Permissions justification

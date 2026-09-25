@@ -20,18 +20,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const reply = async () => {
     switch (message.type) {
       case MessageType.GET_ACTIVE_TAB:
-        return { ok: true, ...(await getPinnedConnection()) };
+        return { ok: true, ...(await getPinnedConnection({ slot: message.slot })) };
       case MessageType.GET_CONNECTIONS:
-        return { ok: true, pin: await resolvePin(), tabs: await listSupportedTabs() };
+        return {
+          ok: true,
+          pin: await resolvePin({ slot: message.slot }),
+          tabs: await listSupportedTabs(),
+        };
       case MessageType.PIN_TAB: {
-        const pin = await pinTab(message.tabId);
+        const pin = await pinTab(message.tabId, { slot: message.slot });
         if (!pin) return { ok: false, error: "Unsupported or closed AI tab." };
-        await updateBadge({ supported: true, platform: pin.platformId, tabId: pin.tabId, url: pin.url });
+        if (message.slot !== "opponent") {
+          await updateBadge({ supported: true, platform: pin.platformId, tabId: pin.tabId, url: pin.url });
+        }
         return { ok: true, pin };
       }
       case MessageType.UNPIN_TAB:
-        await clearPin("unpin");
-        await updateBadge(null);
+        await clearPin("unpin", null, null, { slot: message.slot });
+        if (message.slot !== "opponent") await updateBadge(null);
         return { ok: true };
       case MessageType.PAUSE_CHANGED: {
         const settings = normaliseSettings(await readValue(SETTINGS_KEY, DEFAULT_SETTINGS));

@@ -4,7 +4,8 @@
  *
  * Drives the whole stack — content bridge, service worker wiring and the chess
  * core — against the DOM/API doubles used by the unit tests, then plays a short
- * scripted game and prints the result. Useful as a fast "does anything
+ * scripted game and prints the result. Also exercises the privacy-safe latency
+ * timeline and prints its stage breakdown. Useful as a fast "does anything
  * obviously break" check before loading the extension in Chrome.
  *
  * Usage: `npm run dev:smoke`
@@ -17,12 +18,14 @@ import { installFakeDom } from "../test/helpers/fake-dom.js";
 import { Position } from "../src/core/position.js";
 import { toUci } from "../src/core/move.js";
 import { buildMovePrompt, extractMoveCandidates } from "../src/shared/prompt.js";
+import { LATENCY_STAGES, LatencyTimeline, formatLatencyReport, validateTimelineEntry } from "../src/shared/latency.js";
 
 /** A short, legal game used as the fixture. */
 const SCRIPT = ["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6"];
 
 const dom = installFakeDom();
 const fake = installFakeChrome();
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 try {
   const { ChatBridge } = await import("../src/content/bridge.js");
@@ -85,6 +88,58 @@ try {
   if (!bridge) {
     throw new Error("the chat bridge did not construct");
   }
+
+  // --- Latency timeline: one real send round-trip with stage breakdown -------
+  console.log("\nLatency timeline — stage breakdown\n");
+  const { document } = dom;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const input = document.createElement("textarea", { selectors: ["textarea"] });
+  container.append(input);
+  document.register(input, input.selectorMatches);
+  const send = document.createElement("button", { selectors: ["button[aria-label*='Send' i]"] });
+  send.setAttribute("aria-label", "Send message");
+  send.addEventListener("click", () => {
+    // A real host renders the user echo and clears the composer after submit.
+    const echo = document.createElement("div", { selectors: ["[data-message-author-role='user']"] });
+    echo.textContent = input.value;
+    document.register(echo, echo.selectorMatches);
+    container.append(echo);
+    input.value = "";
+  });
+  container.append(send);
+  document.register(send, send.selectorMatches);
+
+  const timeline = new LatencyTimeline();
+  const sendBridge = new ChatBridge({ hostname: "chatgpt.com", inputTimeout: 200, submitSettleMs: 250 });
+  timeline.begin(); // queued
+  await delay(2);
+  timeline.mark("dispatched");
+  const result = await sendBridge.send(prompt);
+  if (!result.ok) {
+    throw new Error(`the smoke send failed: ${result.error}`);
+  }
+  timeline.mergeExternal(result.diagnostics.stages);
+  await delay(3);
+  timeline.mark("reply-detected"); // the watcher scan point in the real pipeline
+  timeline.mark("parsed");
+  timeline.mark("accepted");
+  timeline.mark("rendered");
+  const entry = timeline.finish();
+  if (!entry) {
+    throw new Error("the latency entry was incomplete — stages did not all record");
+  }
+  const verdict = validateTimelineEntry(entry);
+  if (!verdict.ok) {
+    throw new Error(`latency entry invalid: ${verdict.problems.join("; ")}`);
+  }
+  for (let i = 0; i < LATENCY_STAGES.length; i += 1) {
+    console.log(`  ${LATENCY_STAGES[i].padEnd(15)} +${String(entry.deltasMs[i]).padStart(5)} ms`);
+  }
+  console.log(`  ${"total".padEnd(15)} +${String(entry.totalMs).padStart(5)} ms`);
+  console.log("");
+  console.log(formatLatencyReport([entry]));
+
   console.log("\nSmoke test passed.");
 } catch (error) {
   console.error(`\nSmoke test failed: ${error.message}`);

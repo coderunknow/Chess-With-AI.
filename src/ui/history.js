@@ -81,6 +81,8 @@ export class HistoryView {
   #onSelectPly;
   /** @type {string|null} move-list signature of the last auto-scroll. */
   #lastScrollKey = null;
+  /** @type {string|null} signature of the last painted state (memoisation). */
+  #lastRenderKey = null;
 
   /**
    * @param {object} options
@@ -117,8 +119,20 @@ export class HistoryView {
    * @param {object} [options] forwarded to {@link describeHistory}.
    */
   render(history, options) {
-    const rows = describeHistory(history, options);
+    // Skip the DOM rebuild entirely when ply/revision/format are unchanged —
+    // selection-only re-renders must stay free on the hot path.
     const format = options?.format === "uci" ? "uci" : "san";
+    const renderKey = [
+      history.length,
+      options?.currentPly ?? history.length,
+      options?.startMoveNumber ?? 1,
+      options?.firstMover ?? "w",
+      format,
+      options?.revision ?? 0,
+    ].join(":");
+    if (renderKey === this.#lastRenderKey) return;
+    this.#lastRenderKey = renderKey;
+    const rows = describeHistory(history, options);
     this.#emptyState.hidden = rows.length > 0;
 
     if (rows.length === 0) {

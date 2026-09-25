@@ -32,11 +32,29 @@ export const FONT_SCALES = Object.freeze(["small", "medium", "large"]);
 /** Density modes. */
 export const DENSITIES = Object.freeze(["comfortable", "compact"]);
 
-/** How the AI is asked for moves. */
+/** How the AI is asked for moves. Only the reply style differs — the game state and move-selection logic are identical. */
 export const PROMPT_STYLES = Object.freeze({
   STANDARD: "standard",
   CONCISE: "concise",
+  /** Minimal output: the move only, no commentary. */
+  EFFICIENT: "efficient",
+  /** The move first, then 1–2 short witty sentences (slider-controlled). */
+  FUN: "fun",
 });
+
+/** Allowed prompt-style values. */
+export const PROMPT_STYLE_VALUES = Object.freeze(Object.values(PROMPT_STYLES));
+
+/** Fun-mode commentary length bounds (sentences). */
+export const FUN_SENTENCES_MIN = 1;
+export const FUN_SENTENCES_MAX = 2;
+
+/** Battle clock bounds (local-only, never synced). */
+export const BATTLE_MINUTES_MIN = 1;
+export const BATTLE_MINUTES_MAX = 60;
+export const BATTLE_INCREMENT_CHOICES = Object.freeze([0, 2, 3, 5]);
+export const BATTLE_MAX_PLIES_MIN = 20;
+export const BATTLE_MAX_PLIES_MAX = 500;
 
 /** Interface detail levels: visibility of technical explanations only. */
 export const INTERFACE_DETAILS = Object.freeze(["simple", "advanced"]);
@@ -85,6 +103,11 @@ export const WAITING_REMINDER_CHOICES = Object.freeze([0, 30000, 60000, 120000])
  * @property {'tap-drag'|'tap'|'drag'} moveInteraction pointer gesture style; keyboard always works.
  * @property {boolean} confirmDestructive ask before replacing an ongoing game or switching sides.
  * @property {0|30000|60000|120000} waitingReminderMs quiet "still waiting" notice; never resends.
+ * @property {'standard'|'concise'|'efficient'|'fun'} promptStyle response/output style of the chat prompt.
+ * @property {number} funCommentarySentences fun-mode commentary length (1–2 sentences, slider).
+ * @property {number} battleMinutesPerSide AI-battle clock, minutes per side (1–60).
+ * @property {0|2|3|5} battleIncrementSec AI-battle increment in seconds.
+ * @property {number} battleMaxPlies plies at which an AI battle is adjudicated a draw.
  */
 
 /** @type {Readonly<Settings>} */
@@ -119,6 +142,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   moveInteraction: "tap-drag",
   confirmDestructive: true,
   waitingReminderMs: 0,
+  promptStyle: PROMPT_STYLES.STANDARD,
+  funCommentarySentences: 2,
+  battleMinutesPerSide: 5,
+  battleIncrementSec: 0,
+  battleMaxPlies: 200,
 });
 
 /** Bounds for {@link Settings.maxRetries}. */
@@ -127,6 +155,12 @@ export const MAX_RETRIES_LIMIT = 5;
 function boundedNumber(value, fallback, min, max, integer = true) {
   const num = Number(value);
   return Number.isFinite(num) ? Math.max(min, Math.min(max, integer ? Math.round(num) : num)) : fallback;
+}
+
+/** Like boundedNumber, but null/empty mean "unset" — fall back instead of clamping to the minimum. */
+function boundedNumberOrDefault(value, fallback, min, max, integer = true) {
+  if (value === null || value === undefined || value === "") return fallback;
+  return boundedNumber(value, fallback, min, max, integer);
 }
 
 /**
@@ -200,6 +234,28 @@ export function normaliseSettings(input) {
     waitingReminderMs: WAITING_REMINDER_CHOICES.includes(Number(source.waitingReminderMs))
       ? Number(source.waitingReminderMs)
       : DEFAULT_SETTINGS.waitingReminderMs,
+    promptStyle: asEnum(source.promptStyle, PROMPT_STYLE_VALUES, DEFAULT_SETTINGS.promptStyle),
+    funCommentarySentences: boundedNumberOrDefault(
+      source.funCommentarySentences,
+      DEFAULT_SETTINGS.funCommentarySentences,
+      FUN_SENTENCES_MIN,
+      FUN_SENTENCES_MAX,
+    ),
+    battleMinutesPerSide: boundedNumberOrDefault(
+      source.battleMinutesPerSide,
+      DEFAULT_SETTINGS.battleMinutesPerSide,
+      BATTLE_MINUTES_MIN,
+      BATTLE_MINUTES_MAX,
+    ),
+    battleIncrementSec: BATTLE_INCREMENT_CHOICES.includes(Number(source.battleIncrementSec))
+      ? Number(source.battleIncrementSec)
+      : DEFAULT_SETTINGS.battleIncrementSec,
+    battleMaxPlies: boundedNumberOrDefault(
+      source.battleMaxPlies,
+      DEFAULT_SETTINGS.battleMaxPlies,
+      BATTLE_MAX_PLIES_MIN,
+      BATTLE_MAX_PLIES_MAX,
+    ),
   };
 }
 

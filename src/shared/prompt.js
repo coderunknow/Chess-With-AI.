@@ -1,15 +1,26 @@
 /**
- * Prompt construction and AI reply parsing.
+ * Prompt construction and AI reply parsing — the single source of truth for
+ * every platform and every style.
  *
  * The prompt is deliberately explicit: it names the side to move, restates the
  * FEN, summarises the game so far, and fixes the exact reply format the
- * extension can parse (`[e2e4]`). Everything here is pure string work.
+ * extension can parse (`[e2e4]`). Styles (standard/concise/efficient/fun) vary
+ * only the output contract — the game state and decision context are identical.
+ * Everything here is pure string work.
  *
  * @module shared/prompt
  */
 
 import { MAX_PROMPT_LENGTH, MAX_SCANNED_TEXT_LENGTH } from "./messaging.js";
 import { illegalReasonSentence } from "../core/illegal-move.js";
+import { formatClock } from "./clock.js";
+import { FUN_SENTENCES_MAX, FUN_SENTENCES_MIN, PROMPT_STYLES } from "./settings.js";
+
+/** Size budget for a prompt; the Prompt Studio warns above it. */
+export const PROMPT_SIZE_BUDGET = 800;
+
+/** Default fun-mode commentary length (sentences). */
+export const DEFAULT_FUN_SENTENCES = 2;
 
 /** Bracketed UCI move, e.g. `[g8f6]` or `[e7e8q]`. */
 export const AI_MOVE_PATTERN = /\[([a-h][1-8][a-h][1-8][qrbn]?)\]/gi;
@@ -82,6 +93,12 @@ function extract(text, pattern) {
 }
 
 /**
+ * @typedef {object} BattleClockCue
+ * @property {number} remainingMs the side-to-move's remaining clock time.
+ * @property {number} incrementSec the side-to-move's increment.
+ */
+
+/**
  * @typedef {object} MovePromptInput
  * @property {string} fen position after the human's move.
  * @property {string} uci the human's move.
@@ -89,7 +106,59 @@ function extract(text, pattern) {
  * @property {'w'|'b'} aiColor side the AI plays.
  * @property {string} [history] rendered move list, e.g. `1. e4 e5 2. Nf3`.
  * @property {string} [extraInstruction] appended, e.g. a retry notice.
+ * @property {'standard'|'concise'|'efficient'|'fun'} [style] response/output style only.
+ * @property {number} [funSentences] fun-mode commentary length (1–2).
+ * @property {BattleClockCue|null} [battleClock] clock context, kept in every style.
  */
+
+/**
+ * The chess-clock cue — decision-relevant context that concision must never
+ * strip. Part of the battle prompt variant and of every styled prompt.
+ *
+ * @param {BattleClockCue|null|undefined} battleClock
+ * @returns {string} the clock line, or `''` outside battles.
+ */
+export function battleClockLine(battleClock) {
+  if (!battleClock || typeof battleClock !== "object") return "";
+  const remainingMs = Number(battleClock.remainingMs);
+  const incrementSec = Number(battleClock.incrementSec);
+  if (!Number.isFinite(remainingMs) || !Number.isFinite(incrementSec)) return "";
+  return `You have ${formatClock(Math.max(0, remainingMs))} left; your increment is ${Math.max(0, Math.round(incrementSec))}s.`;
+}
+
+/**
+ * Fun-mode tail: the move comes first; the commentary must not smuggle moves.
+ *
+ * @param {number} [funSentences]
+ * @returns {string[]} lines.
+ */
+function funTail(funSentences) {
+  const n = Math.max(
+    FUN_SENTENCES_MIN,
+    Math.min(FUN_SENTENCES_MAX, Math.round(Number(funSentences) || DEFAULT_FUN_SENTENCES)),
+  );
+  return [
+    `After the move, add ${n} short witty sentence${n === 1 ? "" : "s"} of commentary about the move or position.`,
+    "Keep the commentary fun and do not use square brackets in it.",
+  ];
+}
+
+/**
+ * Appends the style/context tail shared by every prompt variant.
+ *
+ * @param {string[]} lines mutated in place.
+ * @param {object} input
+ * @param {string} [input.style]
+ * @param {number} [input.funSentences]
+ * @param {BattleClockCue|null} [input.battleClock]
+ * @param {string} [input.extraInstruction]
+ */
+function appendContextTail(lines, { style, funSentences, battleClock, extraInstruction = "" } = {}) {
+  const clock = battleClockLine(battleClock);
+  if (clock) lines.push(clock);
+  if (style === PROMPT_STYLES.FUN) lines.push(...funTail(funSentences));
+  if (extraInstruction) lines.push(extraInstruction);
+}
 
 /**
  * Builds the prompt that asks the AI for its next move.
@@ -97,13 +166,26 @@ function extract(text, pattern) {
  * @param {MovePromptInput} input
  * @returns {string} the prompt text.
  */
-export function buildMovePrompt({ fen, uci, san, aiColor, history = "", extraInstruction = "" }) {
+export function buildMovePrompt({
+  fen,
+  uci,
+  san,
+  aiColor,
+  history = "",
+  extraInstruction = "",
+  style = PROMPT_STYLES.STANDARD,
+  funSentences = DEFAULT_FUN_SENTENCES,
+  battleClock = null,
+  opponentIsAi = false,
+}) {
   const sideName = aiColor === "w" ? "WHITE" : "BLACK";
   const humanName = aiColor === "w" ? "Black" : "White";
   const moveText = san ? `${san} ([${uci}])` : `[${uci}]`;
 
   const lines = [
-    `Chess move request. You are playing ${sideName}. The human plays ${humanName}.`,
+    `Chess move request. You are playing ${sideName}. ${
+      opponentIsAi ? `Your opponent is another AI playing ${humanName}.` : `The human plays ${humanName}.`
+    }`,
     `Position (FEN): ${fen}`,
   ];
 
@@ -112,15 +194,24 @@ export function buildMovePrompt({ fen, uci, san, aiColor, history = "", extraIns
   }
 
   lines.push(
-    `The human just played ${moveText}.`,
+    `The ${opponentIsAi ? "other AI" : "human"} just played ${moveText}.`,
     `Choose exactly one legal move for ${sideName} in the FEN position above.`,
-    "Reply with that move in square brackets using coordinate notation, for example [g8f6] or [e7e8q] for a promotion.",
-    "Put the bracketed move first. Do not mention any other move.",
   );
-
-  if (extraInstruction) {
-    lines.push(extraInstruction);
+  lines.push("Check that the move is legal here — pins, castling, en passant and promotion rules apply.");
+  if (style === PROMPT_STYLES.EFFICIENT) {
+    // Minimal output: the chosen move only, in the existing UCI-in-brackets format.
+    lines.push(
+      "Reply with only that move in coordinate notation inside square brackets, for example [g8f6]. No commentary or extra text.",
+    );
+  } else if (style === PROMPT_STYLES.CONCISE) {
+    lines.push("Reply with one bracketed coordinate move, for example [g8f6]. Put it first; no other move.");
+  } else {
+    lines.push(
+      "Reply with that move in square brackets using coordinate notation, for example [g8f6] or [e7e8q] for a promotion.",
+      "Put the bracketed move first. Do not mention any other move.",
+    );
   }
+  appendContextTail(lines, { style, funSentences, battleClock, extraInstruction });
 
   return lines.join("\n");
 }
@@ -131,16 +222,37 @@ export function buildMovePrompt({ fen, uci, san, aiColor, history = "", extraIns
  * @param {object} input
  * @param {'w'|'b'} input.aiColor
  * @param {string} input.fen
+ * @param {string} [input.style]
+ * @param {number} [input.funSentences]
+ * @param {BattleClockCue|null} [input.battleClock]
+ * @param {string} [input.extraInstruction]
  * @returns {string} the prompt text.
  */
-export function buildOpeningPrompt({ aiColor, fen }) {
+export function buildOpeningPrompt({
+  aiColor,
+  fen,
+  style = PROMPT_STYLES.STANDARD,
+  funSentences = DEFAULT_FUN_SENTENCES,
+  battleClock = null,
+  extraInstruction = "",
+  opponentIsAi = false,
+}) {
   const sideName = aiColor === "w" ? "WHITE" : "BLACK";
-  return [
-    `Let's play chess. You are ${sideName} and I am ${aiColor === "w" ? "Black" : "White"}.`,
+  const opponentName = aiColor === "w" ? "Black" : "White";
+  const lines = [
+    opponentIsAi
+      ? `Let's play chess. You are ${sideName}; your opponent is another AI playing ${opponentName}.`
+      : `Let's play chess. You are ${sideName} and I am ${opponentName}.`,
     `Starting position (FEN): ${fen}`,
     "On every turn answer with exactly one legal move in square brackets using coordinate notation, for example [e2e4].",
     "Never answer with more than one bracketed move.",
-  ].join("\n");
+    "Check that every move is legal in the position before answering.",
+  ];
+  if (style === PROMPT_STYLES.EFFICIENT) {
+    lines.push("Reply with only the bracketed move each turn. No commentary or extra text.");
+  }
+  appendContextTail(lines, { style, funSentences, battleClock, extraInstruction });
+  return lines.join("\n");
 }
 
 /**
@@ -154,6 +266,9 @@ export function buildOpeningPrompt({ aiColor, fen }) {
  * @param {{code:string, facts:Record<string,string>}} [input.reason]
  * @param {string[]} [input.legalMoves] obtained from Position.legalMoves(), never parsed from AI text.
  * @param {string[]} [input.rejectedMoves] moves rejected on this ply.
+ * @param {string} [input.style]
+ * @param {number} [input.funSentences]
+ * @param {BattleClockCue|null} [input.battleClock]
  * @returns {string} a bounded correction, never a second initial request.
  */
 export function buildRetryPrompt({
@@ -164,17 +279,27 @@ export function buildRetryPrompt({
   reason = { code: "not-in-legal-set", facts: {} },
   legalMoves = [],
   rejectedMoves = [uci],
+  style = PROMPT_STYLES.STANDARD,
+  funSentences = DEFAULT_FUN_SENTENCES,
+  battleClock = null,
 }) {
   const sideName = aiColor === "w" ? "WHITE" : "BLACK";
   // All bracketed examples in a request are echoes, never reply candidates.
   // Never include bare UCI in the legal list: e2-e4 breaks the UCI regex.
-  const suffix = [
+  const suffixLines = [
     `Previously rejected UCIs (do not repeat): ${rejectedMoves.map(hyphenated).join(", ") || "none"}.`,
     `Play a legal move for ${sideName} now.`,
     "Reply with exactly one bracketed coordinate move. Put the bracketed move first. No second bracketed move.",
-  ].join("\n");
+  ];
+  if (style === PROMPT_STYLES.EFFICIENT) {
+    suffixLines.push("Reply with only the bracketed move. No commentary or extra text.");
+  }
+  appendContextTail(suffixLines, { style, funSentences, battleClock });
+  const suffix = suffixLines.join("\n");
   const head = [
-    `The move [${uci}] is not legal in this position. ${illegalReasonSentence(reason)}`,
+    uci
+      ? `The move [${uci}] is not legal in this position. ${illegalReasonSentence(reason)}`
+      : `No usable move arrived. ${illegalReasonSentence(reason)}`,
     `Position (FEN): ${fen}`,
     `Side to move: ${sideName}.`,
   ];
@@ -204,6 +329,48 @@ function hyphenated(uci) {
     : String(uci)
         .slice(0, 20)
         .replace(/[^a-z0-9-]/gi, "?");
+}
+
+/**
+ * Builds the exact prompt the send path dispatches for the current turn —
+ * shared verbatim by App and the Prompt Studio so studio output and the sent
+ * prompt can never diverge.
+ *
+ * @param {object} context
+ * @param {string} context.fen
+ * @param {'w'|'b'} context.aiColor
+ * @param {string} [context.uci] last move; empty on an opening prompt.
+ * @param {string} [context.san]
+ * @param {string} [context.history]
+ * @param {number} [context.plyCount] 0 starts the game (opening prompt).
+ * @param {string} [context.style]
+ * @param {number} [context.funSentences]
+ * @param {BattleClockCue|null} [context.battleClock]
+ * @param {string} [context.extraInstruction]
+ * @returns {string} the prompt text.
+ */
+export function buildTurnPrompt(context) {
+  const { plyCount = 0, ...input } = context || {};
+  if ((plyCount ?? 0) === 0 && !input.uci) {
+    return buildOpeningPrompt(input);
+  }
+  return buildMovePrompt(input);
+}
+
+/**
+ * Prompt size metrics for the studio: chars/lines plus a warning above the
+ * ~800-character budget.
+ *
+ * @param {string} text
+ * @returns {{chars: number, lines: number, overBudget: boolean}}
+ */
+export function describePromptMetrics(text) {
+  const value = typeof text === "string" ? text : "";
+  return {
+    chars: value.length,
+    lines: value.split("\n").length,
+    overBudget: value.length > PROMPT_SIZE_BUDGET,
+  };
 }
 
 /**

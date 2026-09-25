@@ -1083,5 +1083,170 @@
   },
   "tools_title": {
     "message": "Tools"
+  },
+  "settings_responseStyle": {
+    "message": "Response style"
+  },
+  "settings_styleStandard": {
+    "message": "Standard"
+  },
+  "settings_styleConcise": {
+    "message": "Concise"
+  },
+  "settings_styleEfficient": {
+    "message": "Efficient \u2014 move only"
+  },
+  "settings_styleFun": {
+    "message": "Fun \u2014 with commentary"
+  },
+  "settings_funSentences": {
+    "message": "Fun commentary (sentences)"
+  },
+  "settings_funSentencesHint": {
+    "message": "Fun mode adds 1\u20132 short witty sentences after the move. The move is always parsed first."
+  },
+  "battle_title": {
+    "message": "AI battle (unrated)"
+  },
+  "battle_separation": {
+    "message": "Battles are UNRATED. Rated match records are never touched by a battle."
+  },
+  "battle_opponentTab": {
+    "message": "Opponent tab"
+  },
+  "battle_opponentColor": {
+    "message": "Opponent plays"
+  },
+  "battle_playWhite": {
+    "message": "White"
+  },
+  "battle_playBlack": {
+    "message": "Black"
+  },
+  "battle_minutes": {
+    "message": "Minutes per side"
+  },
+  "battle_increment": {
+    "message": "Increment (seconds)"
+  },
+  "battle_start": {
+    "message": "Start battle"
+  },
+  "battle_pause": {
+    "message": "Pause"
+  },
+  "battle_resume": {
+    "message": "Resume"
+  },
+  "battle_askAgain": {
+    "message": "Ask again"
+  },
+  "battle_abort": {
+    "message": "Abort battle"
+  },
+  "battle_rematch": {
+    "message": "Rematch"
+  },
+  "battle_export": {
+    "message": "Export battle PGN"
+  },
+  "battle_exportAll": {
+    "message": "Export all battles"
+  },
+  "battle_empty": {
+    "message": "No battles recorded yet."
+  },
+  "battle_wdl": {
+    "message": "{white} vs {black}: {w}W-{d}D-{l}L"
+  },
+  "battle_manualMode": {
+    "message": "Battles need Auto send mode. Switch to Auto to start one."
+  },
+  "battle_needsMainPin": {
+    "message": "Pin an AI tab first, then start the battle."
+  },
+  "battle_pinFailed": {
+    "message": "Could not pin the opponent tab for the battle."
+  },
+  "battle_pausedByUser": {
+    "message": "Battle paused. The clock is stopped."
+  },
+  "battle_restored": {
+    "message": "Battle restored (paused). Resume when you are ready \\u2014 nothing was sent."
+  },
+  "battle_aborted": {
+    "message": "Battle aborted \\u2014 unfinished, no ledger entry."
+  },
+  "battle_finished": {
+    "message": "Battle over: {result} ({reason}). Unrated."
+  },
+  "battle_deliveryContradicted": {
+    "message": "the composer showed a different message (contradiction) \\u2014 nothing is sent with certainty, fail-closed."
+  },
+  "battle_deliveryUnconfirmed": {
+    "message": "the send was never confirmed \\u2014 nothing else was sent."
+  },
+  "battle_deliveryUnreachable": {
+    "message": "the tab could not be reached."
+  },
+  "battle_deliveryFailed": {
+    "message": "the send failed."
+  },
+  "battle_noMove": {
+    "message": "no move came back"
+  },
+  "battle_illegal": {
+    "message": "illegal move"
+  },
+  "battle_pausedIllegal": {
+    "message": "illegal or missing replies after {count} retries. Ask again, Abort, or Export."
+  },
+  "battle_startCancelled": {
+    "message": "Battle not started \u2014 the current game was kept."
+  },
+  "battle_history": {
+    "message": "Battles history"
+  },
+  "studio_title": {
+    "message": "Prompt Studio"
+  },
+  "studio_empty": {
+    "message": "The preview is the exact prompt the send path would dispatch."
+  },
+  "studio_platform": {
+    "message": "Platform: {label}"
+  },
+  "studio_styleLabel": {
+    "message": "Preview style"
+  },
+  "studio_metrics": {
+    "message": "{chars} characters · {lines} lines"
+  },
+  "studio_overBudget": {
+    "message": "Over the 800-character budget — review before relying on it."
+  },
+  "studio_copy": {
+    "message": "Copy prompt"
+  },
+  "studio_copied": {
+    "message": "Prompt copied."
+  },
+  "timeline_title": {
+    "message": "Latency timeline"
+  },
+  "timeline_privacy": {
+    "message": "Stage timings only (ms deltas). Never message text, FENs or titles."
+  },
+  "timeline_copy": {
+    "message": "Copy (redacted)"
+  },
+  "timeline_copied": {
+    "message": "Timeline copied (redacted)."
+  },
+  "timeline_empty": {
+    "message": "No completed moves yet."
+  },
+  "timeline_moveLabel": {
+    "message": "Move {n}: total {total} ms"
   }
 }

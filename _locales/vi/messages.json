@@ -1083,5 +1083,170 @@
   },
   "tools_title": {
     "message": "Công cụ"
+  },
+  "settings_responseStyle": {
+    "message": "Kiểu trả lời"
+  },
+  "settings_styleStandard": {
+    "message": "Tiêu chuẩn"
+  },
+  "settings_styleConcise": {
+    "message": "Súc tích"
+  },
+  "settings_styleEfficient": {
+    "message": "Hiệu quả — chỉ nước đi"
+  },
+  "settings_styleFun": {
+    "message": "Vui — kèm bình luận"
+  },
+  "settings_funSentences": {
+    "message": "Bình luận vui (số câu)"
+  },
+  "settings_funSentencesHint": {
+    "message": "Chế độ Vui thêm 1\u20132 câu bình luận dí dỏm sau nước đi. Nước đi luôn được đọc trước."
+  },
+  "battle_title": {
+    "message": "Đấu AI (không xếp hạng)"
+  },
+  "battle_separation": {
+    "message": "Ván đấu KHÔNG xếp hạng. Hồ sơ xếp hạng không bao giờ bị ván đấu chạm vào."
+  },
+  "battle_opponentTab": {
+    "message": "Tab đối thủ"
+  },
+  "battle_opponentColor": {
+    "message": "Đối thủ cầm"
+  },
+  "battle_playWhite": {
+    "message": "Trắng"
+  },
+  "battle_playBlack": {
+    "message": "Đen"
+  },
+  "battle_minutes": {
+    "message": "Phút mỗi bên"
+  },
+  "battle_increment": {
+    "message": "Phụ cấp (giây)"
+  },
+  "battle_start": {
+    "message": "Bắt đầu ván đấu"
+  },
+  "battle_pause": {
+    "message": "Tạm dừng"
+  },
+  "battle_resume": {
+    "message": "Tiếp tục"
+  },
+  "battle_askAgain": {
+    "message": "Hỏi lại"
+  },
+  "battle_abort": {
+    "message": "Hủy ván đấu"
+  },
+  "battle_rematch": {
+    "message": "Đấu lại"
+  },
+  "battle_export": {
+    "message": "Xuất PGN ván đấu"
+  },
+  "battle_exportAll": {
+    "message": "Xuất tất cả ván đấu"
+  },
+  "battle_empty": {
+    "message": "Chưa có ván đấu nào được ghi."
+  },
+  "battle_wdl": {
+    "message": "{white} gặp {black}: {w}T-{d}H-{l}B"
+  },
+  "battle_manualMode": {
+    "message": "Ván đấu cần chế độ Gửi tự động. Hãy chuyển sang Tự động để bắt đầu."
+  },
+  "battle_needsMainPin": {
+    "message": "Hãy ghim một tab AI trước, rồi bắt đầu ván đấu."
+  },
+  "battle_pinFailed": {
+    "message": "Không ghim được tab đối thủ cho ván đấu."
+  },
+  "battle_pausedByUser": {
+    "message": "Ván đấu đã tạm dừng. Đồng hồ đã dừng."
+  },
+  "battle_restored": {
+    "message": "Đã khôi phục ván đấu (tạm dừng). Tiếp tục khi bạn sẵn sàng \\u2014 chưa gửi gì cả."
+  },
+  "battle_aborted": {
+    "message": "Đã hủy ván đấu \\u2014 chưa xong, không ghi sổ cái."
+  },
+  "battle_finished": {
+    "message": "Ván đấu kết thúc: {result} ({reason}). Không xếp hạng."
+  },
+  "battle_deliveryContradicted": {
+    "message": "ô nhập hiển thị nội dung khác (mâu thuẫn) \\u2014 không gửi gì khi chưa chắc chắn, chặn an toàn."
+  },
+  "battle_deliveryUnconfirmed": {
+    "message": "lần gửi không được xác nhận \\u2014 không gửi thêm gì."
+  },
+  "battle_deliveryUnreachable": {
+    "message": "không liên lạc được tab."
+  },
+  "battle_deliveryFailed": {
+    "message": "lần gửi thất bại."
+  },
+  "battle_noMove": {
+    "message": "không có nước đi nào quay lại"
+  },
+  "battle_illegal": {
+    "message": "nước đi không hợp lệ"
+  },
+  "battle_pausedIllegal": {
+    "message": "phản hồi sai hoặc thiếu sau {count} lần thử. Hãy Hỏi lại, Hủy, hoặc Xuất."
+  },
+  "battle_startCancelled": {
+    "message": "Chưa bắt đầu ván đấu \u2014 ván hiện tại được giữ nguyên."
+  },
+  "battle_history": {
+    "message": "Lịch sử ván đấu"
+  },
+  "studio_title": {
+    "message": "Studio lời nhắc"
+  },
+  "studio_empty": {
+    "message": "Phần xem trước là chính xác lời nhắc mà đường gửi sẽ phát đi."
+  },
+  "studio_platform": {
+    "message": "Nền tảng: {label}"
+  },
+  "studio_styleLabel": {
+    "message": "Kiểu xem trước"
+  },
+  "studio_metrics": {
+    "message": "{chars} ký tự · {lines} dòng"
+  },
+  "studio_overBudget": {
+    "message": "Vượt ngân sách 800 ký tự — xem lại trước khi dùng."
+  },
+  "studio_copy": {
+    "message": "Sao chép lời nhắc"
+  },
+  "studio_copied": {
+    "message": "Đã sao chép lời nhắc."
+  },
+  "timeline_title": {
+    "message": "Dòng thời gian độ trễ"
+  },
+  "timeline_privacy": {
+    "message": "Chỉ mốc thời gian từng bước (ms). Không bao giờ nội dung tin nhắn, FEN hay tiêu đề."
+  },
+  "timeline_copy": {
+    "message": "Sao chép (đã che)"
+  },
+  "timeline_copied": {
+    "message": "Đã sao chép dòng thời gian (đã che)."
+  },
+  "timeline_empty": {
+    "message": "Chưa có nước đi hoàn tất."
+  },
+  "timeline_moveLabel": {
+    "message": "Nước {n}: tổng {total} ms"
   }
 }

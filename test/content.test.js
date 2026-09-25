@@ -647,3 +647,64 @@ test("an old assistant container cannot be replayed after an observer restart", 
     dom.restore();
   }
 });
+
+test("an observed echo confirms promptly instead of burning the full user-echo timeout", async () => {
+  // v0.6 always waited the full USER_MESSAGE_TIMEOUT (350ms) + recheck chain
+  // after the echo was already visible. v0.7 early-exits after one fast
+  // contradiction beat — the fail-closed verdict logic itself is unchanged.
+  const { dom, document, container, input, sendButton } = buildChatPage();
+  try {
+    sendButton.listeners.set("click", [
+      () => {
+        sendButton.clicked = (sendButton.clicked || 0) + 1;
+        const echo = document.createElement("div", { selectors: ["[data-message-author-role='user']"] });
+        echo.textContent = "Full chess prompt";
+        document.register(echo, echo.selectorMatches);
+        container.append(echo);
+        input.value = "";
+      },
+    ]);
+    const started = Date.now();
+    const result = await new ChatBridge({ hostname: "chatgpt.com", submitSettleMs: 2000 }).send("Full chess prompt");
+    const elapsed = Date.now() - started;
+    assert.equal(result.ok, true, result.error);
+    assert.equal(result.method, "button");
+    assert.ok(elapsed < 330, `confirmation took ${elapsed}ms — the redundant echo-timeout is back`);
+    assert.ok(result.diagnostics.stages.submitted, "the submitted stage is recorded");
+    assert.ok(result.diagnostics.stages["echo-observed"], "the echo stage is recorded");
+  } finally {
+    dom.restore();
+  }
+});
+
+test("a contradiction is still caught when the echo was observed (fail-closed preserved)", async () => {
+  // Two NEW user messages — ours plus a different one — stay an ambiguous
+  // failure: the transcript cannot attribute the prompt safely. The fast beat
+  // must never weaken this branch into a silent "confirmed".
+  const { dom, document, container, input, sendButton } = buildChatPage();
+  try {
+    sendButton.listeners.set("click", [
+      () => {
+        sendButton.clicked = (sendButton.clicked || 0) + 1;
+        for (const text of ["Full chess prompt", "A different prompt was sent"]) {
+          const echo = document.createElement("div", { selectors: ["[data-message-author-role='user']"] });
+          echo.textContent = text;
+          document.register(echo, echo.selectorMatches);
+          container.append(echo);
+        }
+        input.value = "";
+      },
+    ]);
+    const result = await new ChatBridge({ hostname: "chatgpt.com", submitSettleMs: 500 }).send("Full chess prompt");
+    assert.equal(result.ok, false, "two new user messages remain fail-closed");
+    assert.equal(result.result, SendResult.SUBMIT_FAILED);
+    assert.equal(sendButton.clicked, 1, "exactly one submit event — never a retry");
+    assert.equal(
+      input.dispatched.some((event) => event.type === "keydown"),
+      false,
+      "no Enter fallback after the click",
+    );
+  } finally {
+    dom.restore();
+  }
+});
