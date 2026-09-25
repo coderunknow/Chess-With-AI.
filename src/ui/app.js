@@ -2269,6 +2269,7 @@ export class App {
           "type-failed": "status.typeFailed",
           "verify-failed": "status.verifyFailed",
           "submit-failed": "status.submitFailed",
+          "submit-not-dispatched": "status.submitNotDispatched",
           "generation-timeout": "status.generationTimeout",
         };
         this.#message = this.#settings.paused

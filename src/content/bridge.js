@@ -30,6 +30,7 @@ import {
   stopCandidatesForHost,
   userSelectorsForHost,
 } from "../shared/platforms.js";
+import { isEchoOfPrompt } from "../shared/prompt.js";
 
 const log = createLogger("bridge");
 export const INPUT_TIMEOUT_MS = 5000;
@@ -52,8 +53,10 @@ export const SendResult = Object.freeze({
   NO_INPUT: "input-missing",
   GENERATION_TIMEOUT: "generation-timeout",
   TYPE_FAILED: "type-failed",
-  /** Validation failed before any click/Enter: the system KNOWS nothing was sent. */
+  /** The transcript proved this prompt did NOT go out (a different new message appeared). */
   SUBMIT_FAILED: "submit-failed",
+  /** No submit event was ever dispatched: the page accepted no send action. */
+  SUBMIT_NOT_DISPATCHED: "submit-not-dispatched",
   /** One submit event fired, but the host never confirmed delivery. NOT a proof of failure. */
   SUBMIT_UNCONFIRMED: "submit-unconfirmed",
   VERIFY_FAILED: "verify-failed",
@@ -277,7 +280,7 @@ export class ChatBridge {
         );
       }
       return this.#failure(
-        SendResult.SUBMIT_FAILED,
+        SendResult.SUBMIT_NOT_DISPATCHED,
         "Nothing was submitted — the page accepted no send action. Copy the prompt and send it yourself.",
       );
     } finally {
@@ -378,12 +381,17 @@ export class ChatBridge {
       const current = input?.isConnected === false ? this.findInput() : input;
       return current ? isComposerEmpty(current) : false;
     };
-    const matchesPrompt = (node) => collapseWhitespace(textOf(node)) === collapseWhitespace(prompt);
+    // Recognise our echo the SAME way the reply observer does (lenient:
+    // prompt-shaped or a shared prefix), so a host that reflows the echoed
+    // user message is not mistaken for a *different* message. Strict exact
+    // equality here was the v0.7.1 top bug: it turned a WORKING send (composer
+    // cleared, echo present) into a false "contradicted" / "could not submit".
+    const isOurEcho = (node) => isEchoOfPrompt(collapseWhitespace(textOf(node)), prompt);
     let pollMs = POLL_FAST_START_MS;
     for (;;) {
       const messages = newUserMessages(document, this.#userSelectors, before, prompt);
       if (messages.length > 1) return "contradicted";
-      const seenPrompt = messages.length === 1 && matchesPrompt(messages[0]);
+      const seenPrompt = messages.length === 1 && isOurEcho(messages[0]);
       if (seenPrompt) this.#diagnostics.markStage("echo-observed");
       if (seenPrompt || composerEmpty()) {
         // Evidence exists — early-exit once the contradiction beat has had its
@@ -400,7 +408,7 @@ export class ChatBridge {
           return cleared ? "confirmed" : "unconfirmed";
         }
         if (after.length === 1) {
-          if (matchesPrompt(after[0])) {
+          if (isOurEcho(after[0])) {
             this.#diagnostics.markStage("echo-observed");
             return "confirmed";
           }

@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-09-25
+
+### Fixed
+
+- **No more false "Could not submit the prompt. Send it manually to continue." when the send actually worked.** The bridge's post-submit confirmation detected "our echo" with a strict whitespace-collapsed **exact** match, while the reply observer's echo gate already used the lenient `isEchoOfPrompt` (prompt-shaped or shared prefix). Real chess prompts are prompt-shaped, but chat hosts routinely reflow the echoed user message (append an annotation, wrap or re-space nodes). The strict match then failed, the single new user message was misread as a *different* message ("contradicted"), and a **working** send — composer cleared, echo present, the AI already starting to answer — was reported as a hard failure with a "copy it and send it yourself" recovery. `#confirmed()` now recognises the echo exactly the way the observer does, so a reflowed echo is **confirmed**, not contradicted. The fail-closed guarantee is unchanged: a genuinely different new user message (and two-or-more new messages) still fail closed as `submit-failed`.
+- **Distinct, honest copy for a send that was never dispatched.** All submit verdicts previously collapsed into the one generic `status.submitFailed` string. "Nothing was submitted — the page accepted no send action" is now its own verdict (`SendResult.SUBMIT_NOT_DISPATCHED` / `submit-not-dispatched`) with its own English + Vietnamese copy (`status.submitNotDispatched`) and the Copy recovery that matches a provably-unsent prompt. `status.submitFailed` now surfaces only for a genuine contradiction (a different new message proved the prompt never reached the transcript), and a dispatched-but-unconfirmed send still shows the "check the pinned chat" copy and never auto-resends.
+
+### Testing
+
+- New `test/submit-truthfulness.test.js`: red-first regressions at both layers — the content bridge (reflowed echo ⇒ confirmed; unrelated message ⇒ still contradicted; slow echo ⇒ unconfirmed) and the panel (a pending/unconfirmed send never shows `status.submitFailed`, never auto-resends, and still resolves on the reply; `submit-not-dispatched` shows its own copy with Copy recovery; a contradiction still shows `submit-failed`). Full suite 298/298; `npm run verify` and `dev:smoke` green.
+
 ## [0.7.0] - 2026-09-25
 
 ### Added
