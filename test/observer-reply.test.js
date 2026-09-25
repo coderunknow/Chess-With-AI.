@@ -183,7 +183,7 @@ test("ReplyGate: a queued reply is never stranded; a post-submit reply attribute
 // H1 — echo gate, end to end through the real content entry (main.js)
 // ---------------------------------------------------------------------------
 
-async function bootContent() {
+async function bootContent({ submitSettleMs = 60 } = {}) {
   const { dom, document, container, node } = page();
   const fake = installFakeChrome({ storage: { settings: {} } });
   FakeMutationObserver.takeAll();
@@ -204,7 +204,7 @@ async function bootContent() {
   const { startContentScript } = await import("../src/content/main.js");
   assert.equal(
     startContentScript({
-      bridgeOptions: { submitSettleMs: 60 },
+      bridgeOptions: { submitSettleMs },
       watcherOptions: { settleMs: 5, maxWaitMs: 20, stableMs: 10 },
     }),
     true,
@@ -252,14 +252,17 @@ test("H1 e2e: an UNCONFIRMED send's reply in its own new container reaches the p
 });
 
 test("H1 e2e: a reply that lands DURING verification is flushed when the verdict is unconfirmed", async () => {
-  const env = await bootContent();
+  const env = await bootContent({ submitSettleMs: 400 });
   try {
+    let verdict = false;
     const pending = env.fake.dispatchMessage({ type: MessageType.SEND_CHESS_PROMPT, prompt: PROMPT, requestId: 5 });
+    void pending.then(() => (verdict = true));
     await until(() => env.send.clicked === 1);
     const reply = env.node([ASSISTANT], "[d7d6]");
     env.observer().trigger([{ target: env.container, addedNodes: [reply] }]);
     await sleep(40); // scanned while the bridge is still verifying → queued
-    assert.equal(env.aiMoves().length, 0, "not delivered before the send verdict");
+    // Order, not timing: only meaningful while the verdict is still pending.
+    if (!verdict) assert.equal(env.aiMoves().length, 0, "not delivered before the send verdict");
     const response = await pending;
     assert.equal(response.result, "submit-unconfirmed");
     await until(() => env.aiMoves().length === 1);
