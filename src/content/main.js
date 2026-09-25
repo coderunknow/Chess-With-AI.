@@ -25,6 +25,7 @@ import {
 } from "../shared/platforms.js";
 import { ChatBridge } from "./bridge.js";
 import { MoveWatcher } from "./observer.js";
+import { ReplyGate } from "./reply-gate.js";
 
 const log = createLogger("content");
 
@@ -47,24 +48,36 @@ function notifyPanel(payload) {
   }
 }
 
+/**
+ * Content-script entry used by the bootstrap.
+ *
+ * @returns {boolean} true when this call started the content script.
+ */
 export function start() {
+  return startContentScript();
+}
+
+/**
+ * The real entry. The options are test seams only (the bootstrap passes none).
+ *
+ * @param {object} [options]
+ * @param {object} [options.bridgeOptions] extra {@link ChatBridge} options (e.g. `submitSettleMs`).
+ * @param {object} [options.watcherOptions] extra {@link MoveWatcher} timing options.
+ * @returns {boolean} true when this call started the content script.
+ */
+export function startContentScript({ bridgeOptions = {}, watcherOptions = {} } = {}) {
   if (globalThis.__AI_CHESS_COMPANION_STARTED__) return false;
   globalThis.__AI_CHESS_COMPANION_STARTED__ = true;
 
   const platform = platformForHost(window.location.hostname);
   const diagnostics = new DiagnosticsCollector({ platform: platform?.id || "", url: window.location.href });
-  const bridge = new ChatBridge({ diagnostics, hostname: window.location.hostname });
+  const bridge = new ChatBridge({ diagnostics, hostname: window.location.hostname, ...bridgeOptions });
   let paused = false;
   let currentRequestId = null;
-  let deliveryReady = false;
-  let queuedReply = null;
-  // True after ONE submit attempt whose confirmation is still pending: replies
-  // stay queued until the matching user-message echo attributes them to this
-  // request (never to old transcript content or an unrelated chat message).
-  let awaitingEchoGate = false;
 
   const deliver = (event) => {
     watcher.stop();
+    diagnostics.setReply({ attribution: gate.attribution });
     const payload = {
       ...event,
       requestId: currentRequestId,
@@ -78,29 +91,37 @@ export function start() {
     }
   };
 
+  // Decides WHEN a found reply may reach the panel. After ONE unconfirmed
+  // submit, the first attribution — the matching NEW user echo, or the reply
+  // in its own NEW post-submit container — opens it. A parked reply can
+  // therefore never be stranded, and the gate never submits anything.
+  const gate = new ReplyGate({
+    deliver,
+    onAttributed: (attribution) => {
+      diagnostics.setReply({ attribution });
+      if (attribution !== "echo") return;
+      // The full prompt echoed as a NEW user message: flip the panel to a
+      // confirmed wait WITHOUT another submit.
+      diagnostics.markStage("echo-observed");
+      notifyPanel({ state: STATUS.PROMPT_ECHOED, requestId: currentRequestId, platform: platform?.id || "" });
+    },
+  });
+
   const watcher = new MoveWatcher({
     assistantSelectors: () => assistantSelectorsForHost(window.location.hostname),
     assistantCandidates: () => assistantCandidatesForHost(window.location.hostname),
     userSelectors: userSelectorsForHost(window.location.hostname),
     diagnostics,
+    // No no-move verdict while the host visibly generates (Stop / streaming).
+    isGenerating: () => bridge.findGenerationState().generating,
+    ...watcherOptions,
     onMove: (event) => {
       if (paused) return;
-      if (deliveryReady) deliver(event);
-      else queuedReply = event; // a fast reply during submit verification
+      gate.offer(event); // a fast reply during submit verification is queued
     },
     onEcho: () => {
-      // The ambiguous send is now attributable: the full prompt echoed as a
-      // NEW user message. Flip to a confirmed wait WITHOUT another submit.
-      if (paused || !awaitingEchoGate) return;
-      awaitingEchoGate = false;
-      deliveryReady = true;
-      diagnostics.markStage("echo-observed");
-      notifyPanel({ state: STATUS.PROMPT_ECHOED, requestId: currentRequestId, platform: platform?.id || "" });
-      if (queuedReply) {
-        const reply = queuedReply;
-        queuedReply = null;
-        deliver(reply);
-      }
+      if (paused) return;
+      gate.echo();
     },
   });
 
@@ -109,9 +130,7 @@ export function start() {
     if (paused) {
       watcher.stop();
       bridge.cancel();
-      queuedReply = null;
-      deliveryReady = false;
-      awaitingEchoGate = false;
+      gate.reset();
     }
   };
 
@@ -151,9 +170,7 @@ export function start() {
     if (message.type === MessageType.CANCEL_REPLY) {
       watcher.stop();
       bridge.cancel(); // also abort a Stop/generation wait before it can submit
-      queuedReply = null;
-      deliveryReady = false;
-      awaitingEchoGate = false;
+      gate.reset();
       sendResponse({ ok: true });
       return false;
     }
@@ -185,9 +202,10 @@ export function start() {
       // authoritative: messages cannot bypass it to click the page's controls.
       const manual = stored.sendMode === "manual";
       currentRequestId = message.requestId ?? null;
-      queuedReply = null;
-      deliveryReady = false;
-      awaitingEchoGate = false;
+      // Fresh per-request diagnostics (Manual mode never runs bridge.send,
+      // which would otherwise be the only reset): stages stay attributable.
+      diagnostics.reset();
+      gate.begin();
       watcher.expectReply(prompt, { rejectedMoves: message.rejectedMoves || [], manual });
       if (manual) {
         let copied = false;
@@ -199,10 +217,11 @@ export function start() {
         }
         if (paused) {
           watcher.stop();
+          gate.reset();
           sendResponse({ ok: false, paused: true, error: "The companion is paused." });
           return;
         }
-        deliveryReady = true; // watcher still waits for the user's full prompt echo
+        gate.ready("manual"); // watcher still waits for the user's full prompt echo
         notifyPanel({ state: STATUS.MANUAL, requestId: currentRequestId, platform: platform?.id || "" });
         sendResponse({ ok: true, method: "manual", manual: true, copied });
         return;
@@ -218,8 +237,7 @@ export function start() {
       });
       if (paused) {
         watcher.stop();
-        queuedReply = null;
-        awaitingEchoGate = false;
+        gate.reset();
         notifyPanel({
           state: STATUS.ERROR,
           requestId: currentRequestId,
@@ -238,12 +256,9 @@ export function start() {
       }
       if (!result.ok && result.result === "submit-unconfirmed") {
         // ONE submit event fired; the host just did not confirm it in time.
-        // Never claim "nothing was sent". Keep the watcher armed and gate any
-        // reply on the matching NEW user-message echo — if the message really
-        // went through, the echo (or the reply after it) attributes safely and
-        // NO second submit is issued.
-        awaitingEchoGate = true;
-        deliveryReady = false;
+        // Never claim "nothing was sent". Keep the watcher armed; the first
+        // attribution (matching NEW user echo, or the reply in its own NEW
+        // post-submit container) delivers — NO second submit is ever issued.
         notifyPanel({
           state: STATUS.SUBMIT_UNCONFIRMED,
           requestId: currentRequestId,
@@ -258,12 +273,13 @@ export function start() {
           error: result.error,
           diagnostics: result.diagnostics,
         });
+        gate.unconfirmed(); // a reply parked during verification is delivered now
         watcher.requireUserEcho(); // may resolve immediately when the echo already rendered
         return;
       }
       if (!result.ok) {
         watcher.stop();
-        queuedReply = null;
+        gate.reset();
         let copied = false;
         if (result.result === "generation-timeout") {
           try {
@@ -289,7 +305,6 @@ export function start() {
         });
         return;
       }
-      deliveryReady = true;
       notifyPanel({
         state: STATUS.PROMPT_SENT,
         requestId: currentRequestId,
@@ -298,13 +313,10 @@ export function start() {
         diagnostics: result.diagnostics,
       });
       sendResponse({ ok: true, method: result.method, diagnostics: result.diagnostics });
-      if (queuedReply) {
-        const reply = queuedReply;
-        queuedReply = null;
-        deliver(reply);
-      }
+      gate.ready("confirmed"); // flushes a fast reply that beat the acknowledgement
     })().catch((error) => {
       watcher.stop();
+      gate.reset();
       log.error("sending the prompt failed", error);
       const detail = error?.message || "The chess prompt could not be sent.";
       notifyPanel({ state: STATUS.ERROR, error: detail, requestId: currentRequestId, platform: platform?.id || "" });

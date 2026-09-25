@@ -19,7 +19,7 @@
  * @module content/observer
  */
 
-import { extractMoveCandidates, isEchoOfPrompt } from "../shared/prompt.js";
+import { extractMoveCandidates, isEchoOfPrompt, stripPromptEcho } from "../shared/prompt.js";
 import { createLogger } from "../shared/log.js";
 import {
   collapseWhitespace,
@@ -89,6 +89,18 @@ export class MoveWatcher {
   #diagnostics = null;
   #lastScanHadNoMove = false;
   #known = new Set();
+  /**
+   * Collapsed text of each baseline container at the moment it was
+   * baselined. A baseline container whose text was EMPTY (a host that
+   * pre-renders the next assistant bubble) or whose content was fully
+   * replaced (a re-used node) can still carry this request's answer.
+   * Containers remembered during a Manual pre-echo window have no entry and
+   * stay strictly ineligible.
+   *
+   * @type {Map<Element, string>}
+   */
+  #baselineText = new Map();
+  #echoSkipped = 0;
   #submitted = false;
   #manual = false;
   #awaitEcho = false;
@@ -108,6 +120,9 @@ export class MoveWatcher {
    * @param {string[]} [options.userSelectors]
    * @param {() => void} [options.onEcho] fired once the matching NEW user-message echo appears
    *   after {@link MoveWatcher#requireUserEcho}.
+   * @param {number} [options.stableMs] how long reply text must stay unchanged to count as settled.
+   * @param {() => boolean} [options.isGenerating] true while the host still generates; no
+   *   no-move verdict (and no bare-UCI fallback) is issued while it returns true.
    */
   constructor({
     onMove,
@@ -118,8 +133,12 @@ export class MoveWatcher {
     diagnostics = null,
     userSelectors = [],
     onEcho = () => {},
+    stableMs = STABLE_MS,
+    isGenerating = () => false,
   }) {
     this.onMove = onMove;
+    this.stableMs = stableMs;
+    this.isGenerating = isGenerating;
     this.onEcho = onEcho;
     this.getAssistantSelectors = assistantSelectors;
     this.getAssistantCandidates = assistantCandidates;
@@ -181,7 +200,8 @@ export class MoveWatcher {
     this.#manual = manual;
     this.#awaitEcho = false;
     this.#userBefore = userMessageSnapshot(document, this.#userSelectors);
-    this.#known = this.#existingAssistantContainers();
+    this.#echoSkipped = 0;
+    this.#rebaseline();
     this.start();
   }
 
@@ -201,11 +221,24 @@ export class MoveWatcher {
     this.#awaitEcho = true;
   }
 
-  /** @returns {boolean} true when a NEW user message matches the expected prompt. */
+  /**
+   * @returns {boolean} true when a NEW user message matches the expected prompt.
+   *
+   * Every node that is new since the request baseline is judged by the same
+   * lenient `isEchoOfPrompt` the bridge uses. v0.7.1 pre-filtered through
+   * `newUserMessages`, which keeps a node only if it is a known user-side
+   * element or its text equals the prompt EXACTLY — so ChatGPT's outer turn
+   * article ("You said: …"), Grok's `.items-end .message-bubble` or a
+   * reflowed Perplexity echo were discarded before the check and the gate
+   * could never open (v0.7.2 top bug, H1).
+   */
   #echoSeen() {
     if (!this.#expectedPrompt || !this.#userSelectors.length) return false;
-    const messages = newUserMessages(document, this.#userSelectors, this.#userBefore, this.#expectedPrompt);
-    return messages.some((node) => isEchoOfPrompt(collapseWhitespace(textOf(node)), this.#expectedPrompt));
+    for (const node of userMessageSnapshot(document, this.#userSelectors)) {
+      if (this.#userBefore.has(node)) continue;
+      if (isEchoOfPrompt(collapseWhitespace(textOf(node)), this.#expectedPrompt)) return true;
+    }
+    return false;
   }
 
   #openEchoGate() {
@@ -225,7 +258,31 @@ export class MoveWatcher {
     // Auto: snapshot immediately BEFORE the click. Manual: the mutation batch
     // may already include the echo AND a fast assistant response. Rebasing to
     // the current DOM then would incorrectly classify that reply as history.
-    if (!preserveKnown) this.#known = this.#existingAssistantContainers();
+    if (!preserveKnown) this.#rebaseline();
+  }
+
+  /** Snapshots the current assistant containers (and their text) as history. */
+  #rebaseline() {
+    this.#known = this.#existingAssistantContainers();
+    this.#baselineText = new Map(
+      [...this.#known].map((container) => [container, collapseWhitespace(textOf(container))]),
+    );
+  }
+
+  /**
+   * @param {Element} container a baseline container.
+   * @returns {boolean} true when it now carries NEW content: it was empty at
+   *   the baseline (pre-rendered bubble) or its content was fully replaced
+   *   (re-used node). An old reply that is merely re-rendered keeps (or
+   *   extends) its baseline text and is never replayed.
+   */
+  #isRefilled(container) {
+    const baseline = this.#baselineText.get(container);
+    if (baseline === undefined) return false;
+    const current = collapseWhitespace(textOf(container));
+    if (!current) return false;
+    if (baseline === "") return true;
+    return !current.includes(baseline) && !baseline.includes(current);
   }
 
   /**
@@ -322,8 +379,10 @@ export class MoveWatcher {
     }
 
     const container = this.#resolveContainer(element);
-    if (!container || this.#known.has(container)) {
-      return;
+    if (!container) return;
+    if (this.#known.has(container)) {
+      if (!this.#isRefilled(container)) return;
+      this.#diagnostics?.setReply?.({ refilled: true });
     }
 
     this.#pending.delete(container);
@@ -374,39 +433,51 @@ export class MoveWatcher {
     if (this.#maxWaitTimer === 0) {
       this.#maxWaitTimer = window.setTimeout(() => {
         this.#maxWaitTimer = 0;
-        this.#scan();
+        // MAX_WAIT caps how long a MOVE may be postponed by a page that keeps
+        // mutating. It never issues a no-move verdict for text that is still
+        // changing (that verdict stopped the watcher and lost the real move).
+        this.#scan({ settled: false });
       }, this.maxWaitMs);
     }
   }
 
-  #checkStabilityAndScan() {
-    // Check if pending containers have stable text for STABLE_MS
-    let allStable = true;
-    for (const container of this.#pending) {
-      const currentText = textOf(container);
-      const last = this.#lastTexts.get(container);
-      if (!last || last.text !== currentText) {
-        this.#lastTexts.set(container, { text: currentText, timestamp: Date.now() });
-        allStable = false;
-      } else {
-        const age = Date.now() - last.timestamp;
-        if (age < STABLE_MS) {
-          allStable = false;
-        }
-      }
-    }
-
-    if (!allStable) {
-      // Reschedule stability check
-      window.clearTimeout(this.#stableTimer);
-      this.#stableTimer = window.setTimeout(() => this.#checkStabilityAndScan(), 200);
-      return;
-    }
-
-    this.#scan();
+  /** Re-checks parked (still-streaming / still-generating) containers soon. */
+  #scheduleRecheck() {
+    window.clearTimeout(this.#stableTimer);
+    const pollMs = Math.max(10, Math.min(200, this.stableMs));
+    this.#stableTimer = window.setTimeout(() => this.#checkStabilityAndScan(), pollMs);
   }
 
-  #scan() {
+  /**
+   * @param {Element} container
+   * @param {string} text current raw text.
+   * @returns {boolean} true when the text has not changed for `stableMs`.
+   */
+  #isStable(container, text) {
+    const last = this.#lastTexts.get(container);
+    if (!last || last.text !== text) {
+      this.#lastTexts.set(container, { text, timestamp: Date.now() });
+      return false;
+    }
+    return Date.now() - last.timestamp >= this.stableMs;
+  }
+
+  #checkStabilityAndScan() {
+    // Every pending container must have kept the same text for `stableMs`.
+    let allStable = true;
+    for (const container of this.#pending) {
+      if (!this.#isStable(container, textOf(container))) allStable = false;
+    }
+    if (!allStable) {
+      this.#scheduleRecheck();
+      return;
+    }
+    // Stable text while the host still generates: report a move if one is
+    // there, but keep no-move candidates parked until generation ends.
+    this.#scan({ settled: true });
+  }
+
+  #scan({ settled = true } = {}) {
     window.clearTimeout(this.#settleTimer);
     window.clearTimeout(this.#maxWaitTimer);
     window.clearTimeout(this.#stableTimer);
@@ -417,37 +488,59 @@ export class MoveWatcher {
     const containers = [...this.#pending];
     this.#pending.clear();
 
+    let generating = false;
+    try {
+      generating = Boolean(this.isGenerating());
+    } catch (error) {
+      log.debug("generation probe failed", error);
+    }
     let foundNoMoveText = "";
+    /** Containers whose verdict must wait (still streaming / generating). */
+    const parked = [];
 
     for (let index = containers.length - 1; index >= 0; index -= 1) {
-      const rawText = textOf(containers[index]);
+      const container = containers[index];
+      const rawText = textOf(container);
       if (!rawText) {
         continue;
       }
+      // `settled` means the stability pass already proved every pending
+      // container quiet; a MAX_WAIT pass checks each one individually.
+      const stable = settled || this.#isStable(container, rawText);
+      const final = stable && !generating;
 
+      // A verbatim copy of our own prompt (turn wrappers, or an AI quoting
+      // the whole request) is removed first; what remains is the answer.
       const normalized = normaliseReplyText(rawText);
-      if (this.#isEcho(normalized)) {
+      const { text, stripped } = stripPromptEcho(normalized, this.#sentPrompts);
+      if (!text.trim() || this.#isEcho(text)) {
+        this.#echoSkipped += 1;
+        this.#diagnostics?.setReply?.({ echoSkipped: this.#echoSkipped });
         continue;
       }
 
-      if (/\b(?:I resign|I concede|I forfeit)\b|^resign[.!]?$/i.test(normalized.trim())) {
-        this.onMove({ text: normalized.slice(0, 400), resigned: true });
+      if (/\b(?:I resign|I concede|I forfeit)\b|^resign[.!]?$/i.test(text.trim())) {
+        this.#report({ text: text.slice(0, 400), resigned: true }, "resigned");
         return;
       }
 
-      const candidates = extractMoveCandidates(normalized);
+      // While text is still changing only a CLOSED bracketed move counts.
+      // (Stability alone gates the bare fallback, so a mis-detected Stop
+      // control can never block an Efficient-style bare reply.)
+      const candidates = extractMoveCandidates(text, { allowBare: stable });
       // The first bracketed move is the assistant's answer. Do not skip an
       // already rejected answer to play a later example from its explanation.
       if (candidates.length > 0 && this.#rejectedMoves.has(candidates[0])) {
-        this.onMove({ move: candidates[0], text: normalized.slice(0, 400), noMove: true, repeated: true });
+        this.#report({ move: candidates[0], text: text.slice(0, 400), noMove: true, repeated: true }, "repeated");
         return;
       }
       if (candidates.length === 0) {
-        // Keep track of longest no-move text that looks like a plan reply
-        if (normalized.length > 50 && normalized.length < 20000) {
-          if (normalized.length > foundNoMoveText.length) {
-            foundNoMoveText = normalized;
-          }
+        if (!final) {
+          parked.push(container);
+        } else if (!stripped && text.length > foundNoMoveText.length && text.length < 20000) {
+          // A container that only held our (stripped) prompt plus UI chrome
+          // is never a no-move verdict — only a genuine settled reply is.
+          foundNoMoveText = text;
         }
         continue;
       }
@@ -459,24 +552,37 @@ export class MoveWatcher {
 
       log.debug("detected AI move", move, candidates);
       this.#lastScanHadNoMove = false;
-      this.#diagnostics?.markStage("reply-detected");
-      this.onMove({ move, candidates, text: normalized.slice(0, 400) });
+      this.#report({ move, candidates, text: text.slice(0, 400) }, "move");
       return;
     }
 
-    // No move found but we have text that looks like a plan reply
-    if (foundNoMoveText && !this.#lastScanHadNoMove) {
-      // Only report no-move once per scan cycle to avoid spam
-      this.#lastScanHadNoMove = true;
-      const looksLikePlan =
-        /plan|strategy|think|consider|idea|move|should|would|could/i.test(foundNoMoveText) &&
-        foundNoMoveText.length > 100;
-
-      if (looksLikePlan) {
-        log.debug("detected plan reply with no move", foundNoMoveText.slice(0, 200));
-        this.onMove({ text: foundNoMoveText.slice(0, 1000), noMove: true });
-      }
+    if (parked.length) {
+      // Keep them pending: a later mutation or the re-check decides.
+      for (const container of parked.reverse()) this.#pending.add(container);
+      this.#scheduleRecheck();
+      return;
     }
+
+    // A settled, finished reply without any parseable move: say so honestly
+    // (the panel offers a bounded corrective retry / Ask again) instead of
+    // leaving the game silently frozen. Never a substituted move.
+    if (foundNoMoveText && !this.#lastScanHadNoMove) {
+      this.#lastScanHadNoMove = true;
+      log.debug("detected reply with no move", foundNoMoveText.slice(0, 200));
+      this.#report({ text: foundNoMoveText.slice(0, 1000), noMove: true }, "no-move");
+    }
+  }
+
+  /**
+   * Hands a verdict to the callback, recording privacy-safe diagnostics.
+   *
+   * @param {MoveEvent|NoMoveEvent|object} event
+   * @param {'move'|'no-move'|'repeated'|'resigned'} outcome
+   */
+  #report(event, outcome) {
+    this.#diagnostics?.markStage("reply-detected");
+    this.#diagnostics?.setReply?.({ outcome });
+    this.onMove(event);
   }
 
   /**

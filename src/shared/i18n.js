@@ -465,6 +465,8 @@ const DICTIONARIES = {
       "Fun mode adds 1\u20132 short witty sentences after the move. The move is always parsed first.",
     "status.submitNotDispatched":
       "Nothing was submitted — the chat accepted no send action. Copy it and send it yourself.",
+    // v0.7.2 reply-path truthfulness
+    "status.aiToMove": "{platform} is to move — nothing has been sent yet. Press Ask AI to send the position.",
 
     // Generic
     "generic.ok": "OK",
@@ -911,6 +913,8 @@ const DICTIONARIES = {
     "settings.funSentencesHint":
       "Chế độ Vui thêm 1\u20132 câu bình luận dí dỏm sau nước đi. Nước đi luôn được đọc trước.",
     "status.submitNotDispatched": "Chưa gửi được gì — trang chat không chấp nhận thao tác gửi. Hãy sao chép và tự gửi.",
+    // v0.7.2 reply-path truthfulness
+    "status.aiToMove": "Đến lượt {platform} — chưa có gì được gửi. Bấm Yêu cầu AI đi để gửi thế cờ.",
 
     "generic.ok": "OK",
     "generic.cancel": "Hủy",

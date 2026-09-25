@@ -146,3 +146,74 @@ test("efficient and fun reply contracts survive the retry prompt unchanged", () 
   assert.match(funRetry, /1 short witty sentence/i);
   assert.deepEqual(extractMoveCandidates(funRetry), [], "a retry echo is never a played move");
 });
+
+// ---------------------------------------------------------------------------
+// v0.7.2 — prompt + context engineering (additive only)
+// ---------------------------------------------------------------------------
+
+const V072_STYLES = [PROMPT_STYLES.STANDARD, PROMPT_STYLES.CONCISE, PROMPT_STYLES.EFFICIENT, PROMPT_STYLES.FUN];
+
+test("v0.7.2: every move prompt states the side to move and asks for the move visibly, as plain text", () => {
+  for (const style of V072_STYLES) {
+    const prompt = buildMovePrompt({ ...BASE, style, funSentences: 1 });
+    assert.match(prompt, /^Side to move: BLACK\.$/m, `${style}: explicit side to move`);
+    assert.match(
+      prompt,
+      /visible chat reply as plain text, not in a code block/,
+      `${style}: show the move in the chat`,
+    );
+    assert.match(prompt, /\[e7e8q\]/, `${style}: promotion shape is spelled out`);
+    // Additive only: all v0.7.1 decision context is still present.
+    for (const cue of ["Chess move request", `Position (FEN): ${BASE.fen}`, "Moves so far: 1. e4", "[e2e4]"]) {
+      assert.ok(prompt.includes(cue), `${style} keeps ${cue}`);
+    }
+    // Still prompt-shaped (echo protection) and never parsed as a reply.
+    assert.equal(isEchoOfPrompt(prompt, prompt), true);
+    assert.deepEqual(extractMoveCandidates(prompt), []);
+  }
+});
+
+test("v0.7.2: the opening prompt (AI to move at ply 0) asks for the first move NOW, visibly", () => {
+  for (const style of V072_STYLES) {
+    const prompt = buildOpeningPrompt({
+      aiColor: "w",
+      fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      style,
+    });
+    assert.match(prompt, /^Side to move: WHITE\.$/m);
+    assert.match(prompt, /It is your move now/, `${style}: a protocol-only opener invited 'Ready when you are!'`);
+    assert.match(prompt, /visible chat reply as plain text, not in a code block/);
+    assert.match(prompt, /Let's play chess\. You are WHITE/, "existing protocol text stays");
+    assert.deepEqual(extractMoveCandidates(prompt), []);
+  }
+});
+
+test("v0.7.2: the corrective retry prompt also asks for a visible plain-text move and keeps every cue", () => {
+  const retry = buildRetryPrompt({
+    fen: BASE.fen,
+    uci: "e2e4",
+    aiColor: "b",
+    history: "1. e4",
+    legalMoves: ["g8f6", "e7e5"],
+    rejectedMoves: ["e2e4"],
+    battleClock: { remainingMs: 60000, incrementSec: 1 },
+  });
+  assert.match(retry, /visible chat reply as plain text, not in a code block/);
+  for (const cue of [`Position (FEN): ${BASE.fen}`, "Side to move: BLACK.", "Legal moves (2 total): g8-f6 e7-e5"]) {
+    assert.ok(retry.includes(cue), `retry keeps ${cue}`);
+  }
+  assert.match(retry, /Previously rejected UCIs \(do not repeat\): e2-e4\./);
+  assert.match(retry, /You have 01:00 left/);
+});
+
+test("v0.7.2: typical prompts stay within the 800-char budget and the Studio stays byte-identical", () => {
+  const history = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5";
+  for (const style of V072_STYLES) {
+    const context = { ...BASE, history, plyCount: 12, style, funSentences: 2 };
+    const prompt = buildTurnPrompt(context);
+    assert.equal(describePromptMetrics(prompt).overBudget, false, `${style} is ${prompt.length} chars`);
+    assert.equal(buildStudioPreview({ context, platformLabel: "Claude" }).text, prompt);
+  }
+  const opening = buildTurnPrompt({ aiColor: "w", fen: BASE.fen, plyCount: 0, style: PROMPT_STYLES.FUN });
+  assert.equal(describePromptMetrics(opening).overBudget, false);
+});

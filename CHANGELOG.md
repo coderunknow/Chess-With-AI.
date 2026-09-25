@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-09-25
+
+### Fixed
+
+- **"The AI answered, but the board didn't move."** Root cause (H1, proven red-first): after a send whose delivery could not be confirmed, v0.7.1 parked the AI's reply until a matching user echo was recognised — but the echo check pre-filtered new user nodes through `newUserMessages`, which keeps a node only if it is a known user-side element **or** its text equals the prompt *exactly*. ChatGPT's outer turn article ("You said: …"), Grok's `.items-end .message-bubble` and reflowed Perplexity echoes were discarded before the lenient `isEchoOfPrompt` ever ran, so the gate never opened and the reply sat in `queuedReply` forever. The observer now judges **every** new user node with `isEchoOfPrompt`, and a new pure `ReplyGate` (`src/content/reply-gate.js`) attributes a reply as soon as it is safely attributable — the matching echo **or** the reply in its own new post-submit assistant container. A parked reply can no longer be stranded, and **no second submit is ever issued**.
+- **Pre-created or re-used assistant bubbles (H2).** A container that was empty at the submit baseline (a host pre-rendering the next turn) or whose content was fully replaced (a re-used node) is now scanned when the move arrives. An old reply that is merely re-rendered is still never replayed.
+- **Streaming past `MAX_WAIT_MS`.** The max-wait scan used to issue a premature "no move" for a still-streaming plan-like reply, which stopped the watcher and lost the real move that followed. Max-wait now only reports moves; no-move needs settled text and a finished generation, and the bare-UCI fallback is used only for stable text (a half-streamed `[e7e8` is never read as `e7e8`).
+- **Quoted prompt before the answer (H3).** A container that repeats the whole prompt verbatim (turn wrappers, or an AI quoting the request) has that copy stripped before parsing (`stripPromptEcho`), so the answer after it is read; the echo itself, partial quotes, legal lists and history still never become moves.
+- **No silent stall on a move-less reply.** A settled, finished reply with no parseable move (e.g. "Ready when you are!") now yields the honest no-move state (bounded corrective retry, then **Ask again**) instead of being ignored because it was short or lacked "plan" keywords. Never a substituted move.
+- **Truthful idle status.** "Waiting for {platform} to answer…" is shown only while a request is really pending. When the AI is to move but nothing was sent (a fresh board with the AI as White, a reopened panel), the new `status.aiToMove` copy (en + vi) says so and offers **Ask AI**. A pinned-tab reply that no live request owns is never applied and is surfaced as "arrived too late and was ignored" instead of vanishing.
+- Manual-mode diagnostics are reset per request so the reply stages of one move are never attributed to the previous one.
+
+### Changed
+
+- **Prompt + context engineering (additive only).** Every prompt variant now carries an explicit `Side to move: X.` line and asks the AI to show its move in the visible chat reply as plain text, not in a code block. The opening prompt (the AI moves first) asks for the first move **now** — a protocol-only opener invited "Ready when you are!" and stalled the game. Concise/Efficient spell out the promotion shape `[e7e8q]`; the corrective retry prompt carries the visibility line too. The fun commentary instruction is condensed into one line with the same contract. Nothing decision-relevant was removed (FEN, history, last move, legal and rejected sets, battle clock); the reply grammar is unchanged; Prompt Studio stays byte-identical.
+- Diagnostics report: privacy-safe **reply-path** codes — attribution (`confirmed` / `echo` / `reply` / `manual`), outcome (`move` / `no-move` / `repeated` / `resigned`), skipped-echo count, refilled-container flag. `reply-detected` is now recorded for every verdict, so "answered but didn't move" is diagnosable from stages + delivery state alone.
+
+### Testing
+
+- New `test/observer-reply.test.js` (content layer, 13 tests incl. end-to-end through the real content entry) and `test/reply-apply.test.js` (panel layer, 6 tests), plus 4 prompt tests in `test/prompt-modes.test.js`. Red-first: 10 content + 2 panel + 3 prompt tests failed on v0.7.1 for the diagnosed reasons. Full suite 321/321 (baseline 298); `npm run verify` and `dev:smoke` green. No new wall-clock assertions.
+
 ## [0.7.1] - 2026-09-25
 
 ### Fixed

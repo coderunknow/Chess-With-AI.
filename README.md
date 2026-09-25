@@ -31,7 +31,7 @@ cd Chess-With-AI
 4. Play a move as White, or use **Play Black** to start a new game and **Ask the AI to move**. The reply contract is one bracketed coordinate move, e.g. `[e7e5]`.
 5. For rated play, select **Auto** send mode, keep the pinned tab live, and choose an anchor/move time in **Settings → Engine**. The binary must finish booting before **Start rated game** is enabled. Each match replaces the current game after confirmation.
 
-If a site is still generating, wait for it to finish. **Never press Enter to “wake” a model**. A timeout or unconfirmed send offers **Copy prompt**, without a second click/Enter. In Manual mode paste and submit the copied text yourself; the observer waits for the full user message before accepting a new assistant reply.
+If a site is still generating, wait for it to finish. **Never press Enter to “wake” a model**. A timeout or unconfirmed send offers **Copy prompt**, without a second click/Enter. In Manual mode paste and submit the copied text yourself; the observer waits for the full user message before accepting a new assistant reply. If an Auto send could not be confirmed, the extension never resends: the reply is still accepted as soon as it can be attributed to that one send (the matching echo appears, or the AI answers in a new message after it). A reply with no readable move shows an honest “no move” state with **Ask again**; the local engine never plays for the AI.
 
 ### How it works
 
@@ -47,7 +47,7 @@ Side panel (GameSession + rules + UI) ── SEND_CHESS_PROMPT ──▶ pinned 
               after its UCI_Elo handshake; neither worker plays the chat AI's turn.
 ```
 
-The opening/move/retry prompts include a FEN, side to move and a strict one-bracketed-move reply contract. Echoes of the request and quoted legal-move lists cannot become moves. The user's chat service receives the prompt just as it would if you sent it by hand.
+The opening/move/retry prompts include a FEN, an explicit side-to-move line and a strict one-bracketed-move reply contract, and ask the AI to show that move in its visible reply as plain text (not in a code block) so it can be read back. When the AI is to move first, the opening prompt asks for that move immediately. Echoes of the request and quoted legal-move lists cannot become moves. The user's chat service receives the prompt just as it would if you sent it by hand.
 
 ## Development and quality
 

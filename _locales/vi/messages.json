@@ -1251,5 +1251,8 @@
   },
   "timeline_moveLabel": {
     "message": "Nước {n}: tổng {total} ms"
+  },
+  "status_aiToMove": {
+    "message": "Đến lượt {platform} — chưa có gì được gửi. Bấm Yêu cầu AI đi để gửi thế cờ."
   }
 }
