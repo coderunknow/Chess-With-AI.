@@ -1251,5 +1251,8 @@
   },
   "timeline_moveLabel": {
     "message": "Move {n}: total {total} ms"
+  },
+  "status_aiToMove": {
+    "message": "{platform} is to move — nothing has been sent yet. Press Ask AI to send the position."
   }
 }

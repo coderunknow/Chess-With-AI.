@@ -87,6 +87,8 @@ export const ELEMENT_IDS = [
   "pgn-status",
   "pgn-copy",
   "pgn-load",
+  "what-happened",
+  "what-happened-detail",
 ];
 
 /**

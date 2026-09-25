@@ -177,11 +177,22 @@ export function describeStatus({
     return make(message, StatusKind.INFO, actionFor(session, connection, diagnosticsError));
   }
 
-  if (phase === "awaiting" || session.isWaitingForAi) {
+  if (phase === "awaiting" || phase === "unconfirmed") {
     const text = tr
       ? tr("status.waitingAi", { platform: connection.label })
       : `Waiting for ${connection.label} to answer…`;
     return make(text, StatusKind.WAITING, StatusAction.ASK_AI);
+  }
+  if (session.isWaitingForAi) {
+    // The AI is to move but NO request is pending (fresh board with the AI
+    // as White, a reopened panel, a cancelled request). Claiming we are
+    // "waiting for an answer" here is untrue — and made a stuck game look
+    // like a slow chat. Offer the explicit Ask AI action instead.
+    const platform = connection.label || "the AI";
+    const text = t
+      ? tr("status.aiToMove", { platform })
+      : `${platform} is to move — nothing has been sent yet. Press Ask AI to send the position.`;
+    return make(text, StatusKind.INFO, StatusAction.ASK_AI);
   }
 
   if (session.isCheck) {

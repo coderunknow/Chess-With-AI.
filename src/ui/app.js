@@ -2923,6 +2923,21 @@ export class App {
         if (message?.type === MessageType.CONTENT_STATUS && message.error && !this.#session.isGameOver) {
           this.#delivery = { state: DeliveryState.STALE };
         }
+        // A reply from the PINNED chat that no live request can own (e.g. the
+        // panel was reopened while the AI answered): never apply it, but never
+        // drop it silently either — say so, and leave Ask AI as the explicit
+        // recovery. A live request's state and an accepted answer are kept.
+        if (
+          message?.type === MessageType.AI_MOVE &&
+          this.#pin &&
+          sender?.tab?.id === this.#pin.tabId &&
+          this.#expectedReplyId === null &&
+          !this.#session.isGameOver &&
+          this.#delivery?.state !== DeliveryState.ANSWERED
+        ) {
+          this.#delivery = { state: DeliveryState.STALE };
+          this.#render();
+        }
         return;
       }
       if (message.diagnostics) {
