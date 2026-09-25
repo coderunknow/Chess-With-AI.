@@ -529,6 +529,9 @@
   "status_submitFailed": {
     "message": "Không thể gửi prompt. Hãy gửi thủ công để tiếp tục."
   },
+  "status_submitNotDispatched": {
+    "message": "Chưa gửi được gì — trang chat không chấp nhận thao tác gửi. Hãy sao chép và tự gửi."
+  },
   "controls_undo": {
     "message": "Lùi"
   },

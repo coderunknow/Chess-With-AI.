@@ -529,6 +529,9 @@
   "status_submitFailed": {
     "message": "Could not submit the prompt. Send it manually to continue."
   },
+  "status_submitNotDispatched": {
+    "message": "Nothing was submitted — the chat accepted no send action. Copy it and send it yourself."
+  },
   "controls_undo": {
     "message": "Undo"
   },
