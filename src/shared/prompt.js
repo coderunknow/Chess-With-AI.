@@ -55,7 +55,7 @@ export function extractCommentary(text, { move = "", prompts = [], maxChars = 16
   }
   value = value.replace(/^(?:thinking|reasoning|analysis)\s*[:：-]?/i, "");
   value = value
-    .replace(/[\*_#>`~]/g, " ")
+    .replace(/[*_#>`~]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!value) return "";
