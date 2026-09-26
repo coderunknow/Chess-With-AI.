@@ -1430,6 +1430,11 @@ export class App {
       this.#flipOverride = null;
     }
 
+    if (previous.explainMode !== this.#settings.explainMode && this.#settings.explainMode === "off") {
+      // "Off" means no commentary is held at all — not merely hidden.
+      this.#clearLiveCommentary();
+    }
+
     if (previous.moveInteraction !== this.#settings.moveInteraction) {
       this.#boardView.setInteraction?.(this.#settings.moveInteraction);
     }

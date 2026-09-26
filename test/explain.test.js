@@ -15,8 +15,29 @@ test("Explain defaults to short and invalid values are repaired", () => {
 
 test("commentary extraction is display-only and strips move/protocol noise", () => {
   const reply = "Thinking: **Develops the knight** [g8f6]. ```analysis``` The position is balanced.";
-  assert.equal(extractCommentary(reply, { move: "g8f6" }), "Develops the knight . The position is balanced.");
+  assert.equal(extractCommentary(reply, { move: "g8f6" }), "Develops the knight. The position is balanced.");
   assert.deepEqual(extractMoveCandidates(reply), ["g8f6"]);
+});
+
+test("removing a move token never leaves dangling punctuation or an empty shell", () => {
+  const cases = [
+    ["I play [e7e5]. This opens the centre for the bishops.", "e7e5", "This opens the centre for the bishops."],
+    // SAN mentions are prose, not UCI tokens: they are kept verbatim.
+    ["[g8f6] I develop the knight and attack the e4 pawn.", "g8f6", "I develop the knight and attack the e4 pawn."],
+    ["I choose [e7e6], the French Defence.", "e7e6", "I choose, the French Defence."],
+    ["**[c2c4]** — the English opening, flexible and solid.", "c2c4", "the English opening, flexible and solid."],
+    [
+      "Playing [a7a5] to stop your expansion on the queenside.",
+      "a7a5",
+      "Playing to stop your expansion on the queenside.",
+    ],
+    ["[e2e4]", "e2e4", ""],
+  ];
+  for (const [reply, move, expected] of cases) {
+    assert.equal(extractCommentary(reply, { move }), expected, `reply: ${reply}`);
+  }
+  // The residue repair is cosmetic only: parsing still sees the real move.
+  assert.deepEqual(extractMoveCandidates("I play [e7e5]. This opens the centre."), ["e7e5"]);
 });
 
 test("commentary strips prompt echoes, is bounded, and never parses alternate moves", () => {
@@ -110,6 +131,49 @@ test("inspectState reports PLAY with no violations on a fresh boot", async () =>
     assert.equal(snap.mode, "PLAY");
     assert.deepEqual(snap.violations, []);
     assert.equal(snap.commentary, "");
+  } finally {
+    teardown();
+  }
+});
+
+test("the thinking card renders live commentary and hides when Explain is off", async () => {
+  const { app, refs, teardown } = await bootApp();
+  try {
+    const card = refs["thinking-card"];
+    const body = refs["thinking-card-body"];
+    assert.equal(card.hidden, true, "hidden on a fresh board");
+
+    await app.updateSettings({ explainMode: "short" });
+    app.session.playHumanMove("e2e4");
+    await app.handleAiMove({
+      move: "e7e5",
+      candidates: ["e7e5"],
+      text: "I play [e7e5]. This opens the centre for the bishops.",
+    });
+    assert.equal(card.hidden, false);
+    assert.equal(body.textContent, "This opens the centre for the bishops.");
+    assert.equal(refs["thinking-card-summary"].textContent, "AI's thinking");
+
+    await app.updateSettings({ explainMode: "off" });
+    assert.equal(card.hidden, true, "off hides the card immediately");
+    assert.equal(app.inspectState().commentary, "");
+  } finally {
+    teardown();
+  }
+});
+
+test("the Explain select persists its choice and is restored on render", async () => {
+  const { app, refs, state, teardown } = await bootApp();
+  try {
+    const select = refs["settings-explain-mode"];
+    assert.equal(select.value, "short", "default shown");
+    select.value = "full";
+    select.dispatchEvent({ type: "change", target: select });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(app.settings.explainMode, "full");
+    const stored = state.writes.filter((write) => write.key === "settings").at(-1);
+    assert.equal(stored?.value?.explainMode, "full", "choice survives a reload");
+    assert.equal(select.value, "full", "render keeps the control in sync");
   } finally {
     teardown();
   }

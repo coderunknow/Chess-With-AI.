@@ -521,3 +521,61 @@ test("restart mid-battle restores paused with Resume — never auto-continues se
     second.teardown();
   }
 });
+
+test("a malformed persisted snapshot is discarded on panel restore, not restored", async () => {
+  const corrupt = {
+    version: 99,
+    battle: { sides: { w: null, b: null }, clock: { whiteMs: NaN, blackMs: 1, running: null, lastTick: 0 } },
+    sessionSnapshot: { fen: "garbage" },
+  };
+  const { app, state, teardown } = await bootApp({
+    tabs: [CHAT, CLAUDE],
+    pin: { tabId: CHAT.id, platformId: "chatgpt", label: "ChatGPT", title: "ChatGPT" },
+    storage: { [BATTLE_SNAPSHOT_KEY]: corrupt },
+  });
+  try {
+    await delay(25);
+    assert.equal(app.__battleState(), null, "no half-built battle");
+    assert.equal(state.storageData[BATTLE_SNAPSHOT_KEY], undefined, "corrupt snapshot removed");
+    assert.deepEqual(app.inspectState().violations, []);
+    assert.equal(app.inspectState().mode, "PLAY");
+  } finally {
+    teardown();
+  }
+});
+
+test("a well-formed persisted snapshot still restores after validation", async () => {
+  const session = new GameSession({ playerColor: "w" });
+  assert.equal(session.playHumanMove("e2e4").ok, true);
+  // Candidates are `{uci}` objects; a legal one is applied by this call.
+  const adjudicated = session.playBattleReply([{ uci: "e7e5" }]);
+  assert.equal(adjudicated.ok, true, JSON.stringify(adjudicated.error ?? ""));
+  assert.equal(session.history.length, 2);
+  const battle = createBattle({
+    sides: {
+      w: { tabId: CHAT.id, slot: "main", platformId: "chatgpt", label: "ChatGPT", title: "ChatGPT" },
+      b: { tabId: CLAUDE.id, slot: "opponent", platformId: "claude", label: "Claude", title: "Claude" },
+    },
+    minutesPerSide: 5,
+    incrementSec: 3,
+    maxPlies: 200,
+  });
+  const snapshot = serializeBattle(battle, session);
+  const { app, state, teardown } = await bootApp({
+    tabs: [CHAT, CLAUDE],
+    pin: { tabId: CHAT.id, platformId: "chatgpt", label: "ChatGPT", title: "ChatGPT" },
+    storage: { [BATTLE_SNAPSHOT_KEY]: snapshot },
+  });
+  try {
+    await delay(25);
+    const restored = app.__battleState();
+    assert.ok(restored, "valid snapshot restores");
+    assert.equal(restored.paused, true, "restore is ALWAYS paused");
+    assert.equal(app.session.history.length, 2, "moves replayed");
+    assert.ok(state.storageData[BATTLE_SNAPSHOT_KEY], "valid snapshot is kept");
+    assert.equal(app.inspectState().mode, "BATTLE");
+    assert.deepEqual(app.inspectState().violations, []);
+  } finally {
+    teardown();
+  }
+});

@@ -41,6 +41,81 @@ export const COMMENTARY_MAX_SHORT = 160;
 export const COMMENTARY_MAX_FULL = 600;
 
 /**
+ * Words that carry no meaning on their own once a move token is removed. A
+ * leading fragment made only of these ("I play", "I choose to") is the empty
+ * shell left behind by removal, so it is dropped from the display text.
+ */
+const SHELL_WORDS = Object.freeze(
+  new Set([
+    "i",
+    "i'll",
+    "i'll",
+    "im",
+    "i'm",
+    "play",
+    "plays",
+    "played",
+    "playing",
+    "choose",
+    "chooses",
+    "go",
+    "goes",
+    "going",
+    "with",
+    "to",
+    "the",
+    "a",
+    "an",
+    "my",
+    "move",
+    "moves",
+    "is",
+    "am",
+    "will",
+    "ll",
+    "of",
+    "for",
+    "and",
+    "that",
+    "it",
+    "as",
+    "in",
+    "on",
+  ]),
+);
+
+/**
+ * Repairs the residue left when a move token is removed from prose:
+ * `"I play [e7e5]. This opens…"` must not display as `"I play . This opens…"`.
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+function repairRemovedTokenResidue(value) {
+  const repaired = value
+    .replace(/\s+([,.!?;:])/g, "$1") // "play ." -> "play."
+    .replace(/([,;:])\s+(?=[.!?:;])/g, "$1")
+    .replace(/^[\s,.!?;:\-–—]+/, "") // drop orphaned leading punctuation
+    .replace(/\s+/g, " ")
+    .trim();
+  // Drop a leading shell fragment ("I play.", "I choose to.") if one exists.
+  const sentences = repaired.split(/(?<=[.!?])\s+/);
+  while (sentences.length > 1) {
+    const words = sentences[0]
+      .replace(/[^\p{L}\p{N}'’]+/gu, " ")
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    const isShell =
+      words.length > 0 && words.length <= 4 && words.every((word) => SHELL_WORDS.has(word.replace(/[’']/g, "'")));
+    if (!isShell) break;
+    sentences.shift();
+  }
+  return sentences.join(" ").trim();
+}
+
+/**
  * Extract display-only explanation from a reply. It is deliberately separate
  * from move parsing: commentary can never affect legality or state.
  *
@@ -66,6 +141,7 @@ export function extractCommentary(text, { move = "", prompts = [], maxChars = CO
     .replace(/[*_#>`~]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  value = repairRemovedTokenResidue(value);
   if (!value) return "";
   const cap = Math.max(0, Number(maxChars) || COMMENTARY_MAX_SHORT);
   return value.slice(0, cap).trim();
