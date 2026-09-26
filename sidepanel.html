@@ -71,6 +71,11 @@
       <p id="status" class="status" role="status" aria-live="polite" data-kind="info">Starting up…</p>
       <button id="status-action" class="status-action" type="button" hidden></button>
 
+      <details id="thinking-card" class="thinking-card panel-section" hidden>
+        <summary id="thinking-card-summary" data-i18n="explain.thinking">AI's thinking</summary>
+        <p id="thinking-card-body" class="thinking-card-body"></p>
+      </details>
+
       <div class="controls">
         <button id="copy-prompt" type="button" class="button" hidden>Copy prompt</button>
         <button id="reload-tab" type="button" class="button" hidden>Reload tab</button>
@@ -555,6 +560,17 @@
             <option value="efficient" data-i18n="settings.styleEfficient">Efficient — move only</option>
             <option value="fun" data-i18n="settings.styleFun">Fun — with commentary</option>
           </select>
+        </label>
+        <label class="field" for="settings-explain-mode"
+          ><span id="settings-explain-mode-label" data-i18n="settings.explainMode">Explain</span>
+          <select id="settings-explain-mode" class="select">
+            <option value="off" data-i18n="settings.explainOff">Off</option>
+            <option value="short" selected data-i18n="settings.explainShort">Short</option>
+            <option value="full" data-i18n="settings.explainFull">Full</option>
+          </select>
+          <span id="settings-explain-mode-hint" class="hint" data-i18n="settings.explainHint"
+            >Show a live-only reason after the move. Never saved.</span
+          >
         </label>
         <label class="field" for="settings-fun-sentences"
           ><span id="settings-fun-sentences-label">Fun commentary (sentences)</span>

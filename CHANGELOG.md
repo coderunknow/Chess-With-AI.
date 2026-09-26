@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Continuation work after v0.7.2 (PR #13). Not a version bump — foundations only.
+
+### Added
+
+- Authoritative `Mode` vocabulary (`PLAY` | `RATED` | `BATTLE` | `BOT_VS_AI`) with an explicit transition table and `deriveMode` from live App ownership (`src/ui/modes.js`).
+- Pure, privacy-safe `checkInvariants(state)` for request/phase agreement, mode ownership, board/session sync, clock ownership, pause/terminal cleanup, and pending-side checks (`src/ui/invariants.js`). App exposes `inspectState()` for tests.
+- **Explain** setting (`off` / `short` / **`full`**, default **`short`**) with a live-only collapsible thinking card. `extractCommentary` strips prompt echoes, move tokens, code fences, and markdown; commentary never enters storage, PGN, timeline, diagnostics, or logs.
+- Short-explain prompt line (standard/concise only; Efficient stays move-only). `opponentIsEngine` prompt wording and a `Move N (ply P)` line when ply count is known.
+- Battle snapshot validation: malformed or future-version snapshots are discarded safely on restore.
+
+### Testing
+
+- New `test/modes-invariants.test.js` and `test/explain.test.js`; battle restore rejection cases; i18n/locale parity for Explain keys. Suite 321 → 335 green.
+
 ## [0.7.2] - 2026-09-25
 
 ### Fixed

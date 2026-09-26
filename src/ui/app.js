@@ -48,7 +48,14 @@ import {
   tickBattle,
 } from "../shared/battle.js";
 import { PLATFORMS, platformForUrl } from "../shared/platforms.js";
-import { buildRetryPrompt, buildTurnPrompt, formatMoveList } from "../shared/prompt.js";
+import {
+  buildRetryPrompt,
+  buildTurnPrompt,
+  formatMoveList,
+  extractCommentary,
+  COMMENTARY_MAX_FULL,
+  COMMENTARY_MAX_SHORT,
+} from "../shared/prompt.js";
 import { buildStudioPreview } from "./studio.js";
 import { LatencyTimeline, formatLatencyReport } from "../shared/latency.js";
 import { DEFAULT_SETTINGS, SETTINGS_KEY, mergeSettings, resolveTheme, resolveLocale } from "../shared/settings.js";
@@ -74,6 +81,8 @@ import { GameSession, MoveError } from "./game.js";
 import { HistoryView } from "./history.js";
 import { DeliveryState, StatusAction, describeDelivery, describeStatus } from "./status.js";
 import { evaluate, formatEval } from "../core/eval.js";
+import { deriveMode } from "./modes.js";
+import { checkInvariants } from "./invariants.js";
 
 const log = createLogger("panel");
 
@@ -172,6 +181,14 @@ export class App {
   #latency = new LatencyTimeline();
   /** @type {Map<string, HTMLElement|null>} cache for static element ids. */
   #byIdCache = new Map();
+  /**
+   * Live-only AI commentary (never persisted). Cleared on next request, new
+   * game, undo, mode change, pause, and reload.
+   * @type {string}
+   */
+  #commentary = "";
+  /** @type {null} reserved for Bot vs AI — ownership checked by invariants. */
+  #botState = null;
 
   /**
    * @param {object} refs DOM references resolved by `main.js`.
@@ -248,6 +265,7 @@ export class App {
       plyCount: session.plyCount,
       style: this.#settings.promptStyle,
       funSentences: this.#settings.funCommentarySentences,
+      explainMode: this.#settings.explainMode,
       battleClock: null, // set by the battle loop while a battle runs
       ...extra,
     };
@@ -1093,6 +1111,7 @@ export class App {
       this.#clearSelection();
       this.#hintMove = null;
       this.#delivery = { state: DeliveryState.ANSWERED };
+      this.#applyLiveCommentary(payload, candidates[0]);
       this.#hideCopyPrompt();
       this.#hideReloadTab();
       if (this.#match) this.#match.chatMoves += 1;
@@ -1266,6 +1285,7 @@ export class App {
     this.#hideReloadTab();
     this.#hintMove = null;
     this.#evalScore = null;
+    this.#clearLiveCommentary();
     this.#persist();
     this.#render();
     this.#updateBadge();
@@ -1291,6 +1311,7 @@ export class App {
     this.#phase = Phase.IDLE;
     this.#clearSelection();
     this.#hintMove = null;
+    this.#clearLiveCommentary();
     this.#message = result.ok
       ? this.#t
         ? this.#t("status.undo", { count: result.plies })
@@ -1424,6 +1445,7 @@ export class App {
     if (previous.paused !== this.#settings.paused) {
       if (this.#settings.paused) {
         this.#cancelReply();
+        this.#clearLiveCommentary();
         if (this.#match) this.#abortMatch(this.#t("match.unratedStopped"));
         this.#engineWorker?.terminate();
         this.#engineWorker = null;
@@ -1620,6 +1642,7 @@ export class App {
     // started for it (playBattleReply applies both sides' AI moves strictly).
     this.#session = new GameSession({ playerColor: oppColor === "w" ? "b" : "w" });
     this.#cancelReply();
+    this.#clearLiveCommentary();
     this.#matchFinished = false;
     this.#localEngineMode = false;
     this.#lastIllegalReply = null;
@@ -1868,6 +1891,10 @@ export class App {
     const value = await readValue(BATTLE_SNAPSHOT_KEY, null);
     if (!value || typeof value !== "object" || !value.battle || !value.sessionSnapshot) return;
     const restored = restoreBattle(value);
+    if (!restored) {
+      await removeValue(BATTLE_SNAPSHOT_KEY);
+      return;
+    }
     const mainColor = restored.battle.sides.w.slot === "main" ? "w" : "b";
     this.#session = GameSession.fromSnapshot(restored.sessionSnapshot, { playerColor: mainColor });
     this.#battleState = {
@@ -2208,6 +2235,7 @@ export class App {
       requestId = ++this.#requestCounter;
       this.#expectedReplyId = requestId;
       this.#lastPrompt = prompt;
+      this.#clearLiveCommentary();
       this.#latency.begin(); // stage: queued
       this.#phase = Phase.SENDING;
       this.#delivery = null;
@@ -2373,6 +2401,67 @@ export class App {
   #clearWaitingReminder() {
     clearTimeout(this.#waitingReminderTimer);
     this.#waitingReminderTimer = 0;
+  }
+
+  /** Live-only commentary — never written to storage, PGN, timeline, or logs. */
+  #clearLiveCommentary() {
+    this.#commentary = "";
+  }
+
+  /**
+   * Prefer the content-script-extracted commentary; fall back to a local pure
+   * extraction so unit tests without a content path still exercise the UI.
+   * @param {any} payload
+   * @param {string} move
+   */
+  #applyLiveCommentary(payload, move) {
+    if (this.#settings.explainMode === "off") {
+      this.#commentary = "";
+      return;
+    }
+    const maxChars = this.#settings.explainMode === "full" ? COMMENTARY_MAX_FULL : COMMENTARY_MAX_SHORT;
+    const fromContent = typeof payload?.commentary === "string" ? payload.commentary.trim() : "";
+    if (fromContent) {
+      this.#commentary = fromContent.slice(0, maxChars);
+      return;
+    }
+    const text = typeof payload?.text === "string" ? payload.text : "";
+    this.#commentary = extractCommentary(text, {
+      move,
+      prompts: this.#lastPrompt ? [this.#lastPrompt] : [],
+      maxChars,
+    });
+  }
+
+  /**
+   * Snapshot of authoritative mode + consistency codes for tests / diagnostics.
+   * Codes only — never prompts, chat text, or commentary.
+   * @returns {{mode: string, violations: string[]}}
+   */
+  inspectState() {
+    const mode = deriveMode({
+      match: this.#match,
+      battleState: this.#battleState,
+      botState: this.#botState,
+    });
+    const violations = checkInvariants({
+      mode,
+      expectedReplyId: this.#expectedReplyId,
+      phase: this.#phase,
+      match: this.#match,
+      battleState: this.#battleState,
+      botState: this.#botState,
+      pendingSide: this.#battleState?.pending?.side ?? null,
+      session: { fen: this.#session.fen, turn: this.#session.turn },
+      renderedFen: this.#session.fen,
+      renderedTurn: this.#session.turn,
+      clockRunning: this.#clockState?.running || this.#battleState?.battle?.clock?.running || null,
+      paused: this.#settings.paused,
+      gameOver: this.#session.isGameOver,
+      retryTimerActive: this.#retryPending,
+      engineSearching: false,
+    });
+    return { mode, violations, commentary: this.#commentary };
   }
 
   /** End the single expected reply without unloading its content script. */
@@ -2786,6 +2875,7 @@ export class App {
     enumSetting(settingsDialog.controls.moveListFormat, "moveListFormat");
     enumSetting(settingsDialog.controls.moveInteraction, "moveInteraction");
     enumSetting(settingsDialog.controls.promptStyle, "promptStyle");
+    enumSetting(settingsDialog.controls.explainMode, "explainMode");
     numberSetting(settingsDialog.controls.waitingReminder, "waitingReminderMs");
 
     for (const input of settingsDialog.controls.toggles) {
@@ -3457,6 +3547,17 @@ export class App {
     if (studio.preview) studio.preview.textContent = preview.text;
   }
 
+  /** Collapsible live-only thinking card. textContent only; not aria-live. */
+  #renderThinkingCard() {
+    const card = this.#refs.thinkingCard;
+    if (!card?.root) return;
+    const text = this.#commentary;
+    const show = Boolean(text) && this.#settings.explainMode !== "off" && !this.#settings.paused;
+    card.root.hidden = !show;
+    if (card.body) card.body.textContent = text || "";
+    if (card.summary && this.#t) card.summary.textContent = this.#t("explain.thinking");
+  }
+
   #render() {
     const status = this.#status();
     const session = this.#session;
@@ -3493,6 +3594,7 @@ export class App {
       statusNode.textContent = status.text;
       statusNode.dataset.kind = status.kind;
     }
+    this.#renderThinkingCard();
     if (statusAction) {
       statusAction.hidden = status.action === StatusAction.NONE;
       statusAction.textContent = ACTION_KEYS[status.action] ? this.#t(ACTION_KEYS[status.action]) : "";
@@ -3677,6 +3779,7 @@ export class App {
     if (this.#refs.analysis?.level) this.#refs.analysis.level.value = String(this.#engineLevel);
     if (settingsDialog.controls.sendMode) settingsDialog.controls.sendMode.value = this.#settings.sendMode;
     if (settingsDialog.controls.promptStyle) settingsDialog.controls.promptStyle.value = this.#settings.promptStyle;
+    if (settingsDialog.controls.explainMode) settingsDialog.controls.explainMode.value = this.#settings.explainMode;
     if (settingsDialog.controls.funSentences)
       settingsDialog.controls.funSentences.value = String(this.#settings.funCommentarySentences);
     if (settingsDialog.controls.maxRetries)

@@ -1106,7 +1106,7 @@
     "message": "Bình luận vui (số câu)"
   },
   "settings_funSentencesHint": {
-    "message": "Chế độ Vui thêm 1\u20132 câu bình luận dí dỏm sau nước đi. Nước đi luôn được đọc trước."
+    "message": "Chế độ Vui thêm 1–2 câu bình luận dí dỏm sau nước đi. Nước đi luôn được đọc trước."
   },
   "battle_title": {
     "message": "Đấu AI (không xếp hạng)"
@@ -1205,7 +1205,7 @@
     "message": "phản hồi sai hoặc thiếu sau {count} lần thử. Hãy Hỏi lại, Hủy, hoặc Xuất."
   },
   "battle_startCancelled": {
-    "message": "Chưa bắt đầu ván đấu \u2014 ván hiện tại được giữ nguyên."
+    "message": "Chưa bắt đầu ván đấu — ván hiện tại được giữ nguyên."
   },
   "battle_history": {
     "message": "Lịch sử ván đấu"
@@ -1254,5 +1254,23 @@
   },
   "status_aiToMove": {
     "message": "Đến lượt {platform} — chưa có gì được gửi. Bấm Yêu cầu AI đi để gửi thế cờ."
+  },
+  "settings_explainMode": {
+    "message": "Giải thích"
+  },
+  "settings_explainOff": {
+    "message": "Tắt"
+  },
+  "settings_explainShort": {
+    "message": "Ngắn"
+  },
+  "settings_explainFull": {
+    "message": "Đầy đủ"
+  },
+  "settings_explainHint": {
+    "message": "Hiện lý do trực tiếp sau nước đi. Không bao giờ lưu."
+  },
+  "explain_thinking": {
+    "message": "Suy nghĩ của AI"
   }
 }

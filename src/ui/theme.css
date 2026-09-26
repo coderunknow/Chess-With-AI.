@@ -1341,3 +1341,34 @@ body[data-theme="light"] .status[data-kind="error"] {
     align-items: stretch;
   }
 }
+
+/* Live-only AI thinking card (Explain). Not aria-live; textContent only. */
+.thinking-card {
+  margin: 0.5rem 0;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border, #333);
+  background: var(--surface-2, var(--surface, #1a1a1a));
+  font-size: 0.85rem;
+  max-width: 100%;
+}
+.thinking-card[hidden] {
+  display: none !important;
+}
+.thinking-card > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted, #9aa);
+}
+.thinking-card-body {
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg, #eee);
+  line-height: 1.35;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-card {
+    transition: none;
+  }
+}

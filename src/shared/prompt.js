@@ -36,6 +36,41 @@ const BARE_MOVE_PATTERN = /\b([a-h][1-8][a-h][1-8][qrbn]?)\b/gi;
  */
 export const REPLY_VISIBILITY_LINE = "Show the move in your visible chat reply as plain text, not in a code block.";
 
+/** Caps for live-only commentary display (short / full). */
+export const COMMENTARY_MAX_SHORT = 160;
+export const COMMENTARY_MAX_FULL = 600;
+
+/**
+ * Extract display-only explanation from a reply. It is deliberately separate
+ * from move parsing: commentary can never affect legality or state.
+ *
+ * Pipeline: strip prompt echo → remove code fences → remove bracketed/bare UCI
+ * → strip Thinking boilerplate → collapse markdown noise → bound length.
+ *
+ * @param {unknown} text
+ * @param {{move?: string, prompts?: string[], maxChars?: number}} [options]
+ * @returns {string}
+ */
+export function extractCommentary(text, { move = "", prompts = [], maxChars = COMMENTARY_MAX_SHORT } = {}) {
+  if (typeof text !== "string" || text.length === 0 || text.length > MAX_SCANNED_TEXT_LENGTH) return "";
+  let value = stripPromptEcho(text, prompts).text;
+  value = value.replace(/```[\s\S]*?```/g, " ");
+  value = value.replace(/\[[a-h][1-8][a-h][1-8][qrbn]?\]/gi, " ");
+  value = value.replace(/\b[a-h][1-8][a-h][1-8][qrbn]?\b/gi, " ");
+  if (move) {
+    const escapedMove = move.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    value = value.replace(new RegExp(`\\b${escapedMove}\\b`, "gi"), " ");
+  }
+  value = value.replace(/^(?:thinking|reasoning|analysis)\s*[:：-]?/i, "");
+  value = value
+    .replace(/[*_#>`~]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value) return "";
+  const cap = Math.max(0, Number(maxChars) || COMMENTARY_MAX_SHORT);
+  return value.slice(0, cap).trim();
+}
+
 /** Extra instruction appended when the AI answered with an illegal move. */
 export const RETRY_INSTRUCTION =
   "Your previous answer was not a legal move. Reply with exactly one legal move for the side to move, inside square brackets, for example [g8f6].";
@@ -219,25 +254,35 @@ export function buildMovePrompt({
   funSentences = DEFAULT_FUN_SENTENCES,
   battleClock = null,
   opponentIsAi = false,
+  opponentIsEngine = false,
+  explainMode = "off",
+  plyCount = 0,
 }) {
   const sideName = aiColor === "w" ? "WHITE" : "BLACK";
   const humanName = aiColor === "w" ? "Black" : "White";
   const moveText = san ? `${san} ([${uci}])` : `[${uci}]`;
 
+  const opponentLabel = opponentIsEngine
+    ? `Your opponent is a local chess engine playing ${humanName}.`
+    : opponentIsAi
+      ? `Your opponent is another AI playing ${humanName}.`
+      : `The human plays ${humanName}.`;
   const lines = [
-    `Chess move request. You are playing ${sideName}. ${
-      opponentIsAi ? `Your opponent is another AI playing ${humanName}.` : `The human plays ${humanName}.`
-    }`,
+    `Chess move request. You are playing ${sideName}. ${opponentLabel}`,
     `Position (FEN): ${fen}`,
     `Side to move: ${sideName}.`,
   ];
+  if (Number.isFinite(plyCount) && plyCount > 0) {
+    lines.push(`Move ${Math.ceil(plyCount / 2)} (ply ${plyCount}).`);
+  }
 
   if (history) {
     lines.push(`Moves so far: ${history}`);
   }
 
+  const mover = opponentIsEngine ? "engine" : opponentIsAi ? "other AI" : "human";
   lines.push(
-    `The ${opponentIsAi ? "other AI" : "human"} just played ${moveText}.`,
+    `The ${mover} just played ${moveText}.`,
     `Choose exactly one legal move for ${sideName} in the FEN position above.`,
   );
   lines.push("Check that the move is legal here — pins, castling, en passant and promotion rules apply.");
@@ -257,6 +302,9 @@ export function buildMovePrompt({
     );
   }
   lines.push(REPLY_VISIBILITY_LINE);
+  if (explainMode === "short" && style !== PROMPT_STYLES.EFFICIENT) {
+    lines.push("After the bracketed move, add one short reason (maximum about 20 words), with no square brackets.");
+  }
   appendContextTail(lines, { style, funSentences, battleClock, extraInstruction });
 
   return lines.join("\n");
@@ -282,13 +330,18 @@ export function buildOpeningPrompt({
   battleClock = null,
   extraInstruction = "",
   opponentIsAi = false,
+  opponentIsEngine = false,
+  explainMode = "off",
 }) {
   const sideName = aiColor === "w" ? "WHITE" : "BLACK";
   const opponentName = aiColor === "w" ? "Black" : "White";
-  const lines = [
-    opponentIsAi
+  const opener = opponentIsEngine
+    ? `Let's play chess. You are ${sideName}; your opponent is a local chess engine playing ${opponentName}.`
+    : opponentIsAi
       ? `Let's play chess. You are ${sideName}; your opponent is another AI playing ${opponentName}.`
-      : `Let's play chess. You are ${sideName} and I am ${opponentName}.`,
+      : `Let's play chess. You are ${sideName} and I am ${opponentName}.`;
+  const lines = [
+    opener,
     `Starting position (FEN): ${fen}`,
     `Side to move: ${sideName}.`,
     "On every turn answer with exactly one legal move in square brackets using coordinate notation, for example [e2e4].",
@@ -300,6 +353,8 @@ export function buildOpeningPrompt({
   ];
   if (style === PROMPT_STYLES.EFFICIENT) {
     lines.push("Reply with only the bracketed move each turn. No commentary or extra text.");
+  } else if (explainMode === "short") {
+    lines.push("After the bracketed move, add one short reason (maximum about 20 words), with no square brackets.");
   }
   appendContextTail(lines, { style, funSentences, battleClock, extraInstruction });
   return lines.join("\n");
@@ -405,7 +460,7 @@ export function buildTurnPrompt(context) {
   if ((plyCount ?? 0) === 0 && !input.uci) {
     return buildOpeningPrompt(input);
   }
-  return buildMovePrompt(input);
+  return buildMovePrompt({ ...input, plyCount });
 }
 
 /**
