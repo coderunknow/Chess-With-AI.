@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-26
+
+Continuation work after v0.7.2 (PR #13): mode/invariant foundations, the Explain
+setting, and battle-snapshot hardening.
+
+### Added
+
+- Authoritative `Mode` vocabulary (`PLAY` | `RATED` | `BATTLE` | `BOT_VS_AI`) with an explicit transition table and `deriveMode` from live App ownership (`src/ui/modes.js`).
+- Pure, privacy-safe `checkInvariants(state)` for request/phase agreement, mode ownership, board/session sync, clock ownership, pause/terminal cleanup, and pending-side checks (`src/ui/invariants.js`). App exposes `inspectState()` for tests.
+- **Explain** setting (`off` / `short` / **`full`**, default **`short`**) with a live-only collapsible thinking card. `extractCommentary` strips prompt echoes, move tokens, code fences, and markdown; commentary never enters storage, PGN, timeline, diagnostics, or logs.
+- Short-explain prompt line (standard/concise only; Efficient stays move-only). `opponentIsEngine` prompt wording and a `Move N (ply P)` line when ply count is known.
+- Battle snapshot validation: malformed or future-version snapshots are discarded safely on restore.
+
+### Fixed
+
+- **Removed move tokens no longer leave broken prose.** `"I play [e7e5]. This opens the centre…"` used to display as `"I play . This opens the centre…"`; the extractor now repairs orphaned punctuation/dashes and drops an empty leading shell ("I play.", "I choose to."). Cosmetic only — parsing is untouched.
+- **Explain → Off drops the retained commentary** instead of only hiding the card, so no explanation text is held in memory (or re-shown by `inspectState()`) after the user turns Explain off.
+
+### Testing
+
+- New `test/modes-invariants.test.js` and `test/explain.test.js` (extraction, residue repair, prompt variants, storage privacy, thinking-card DOM, settings persistence); App-level battle restore cases (malformed discarded **and** removed from storage; well-formed still restores); i18n/locale parity for Explain keys. Suite 321 → 340 green.
+
 ## [0.7.2] - 2026-09-25
 
 ### Fixed

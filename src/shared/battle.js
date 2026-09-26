@@ -251,9 +251,41 @@ export function serializeBattle(battle, session) {
   };
 }
 
-/** @param {any} snapshot */
+/**
+ * Validate a persisted snapshot before it reaches GameSession. Storage is
+ * user/browser controlled: malformed or future snapshots must be discarded,
+ * not allowed to throw during panel startup or create a battle with missing
+ * sides/clocks.
+ *
+ * @param {any} snapshot
+ * @returns {{battle: Battle, sessionSnapshot: any}|null}
+ */
 export function restoreBattle(snapshot) {
-  const battle = { ...snapshot.battle };
-  battle.status = "paused";
-  return { battle, sessionSnapshot: snapshot.sessionSnapshot };
+  if (!snapshot || typeof snapshot !== "object" || snapshot.version !== 1) return null;
+  const saved = snapshot.battle;
+  const sessionSnapshot = snapshot.sessionSnapshot;
+  if (!saved || typeof saved !== "object" || !sessionSnapshot || typeof sessionSnapshot !== "object") return null;
+  if (!saved.sides?.w || !saved.sides?.b || !saved.clock || !Array.isArray(sessionSnapshot.moves)) return null;
+  if (
+    ![saved.sides.w, saved.sides.b].every(
+      (side) =>
+        side &&
+        (side.slot === "main" || side.slot === "opponent") &&
+        Number.isInteger(side.tabId) &&
+        typeof side.platformId === "string" &&
+        typeof side.label === "string" &&
+        typeof side.title === "string",
+    )
+  )
+    return null;
+  if (![saved.minutesPerSide, saved.incrementSec, saved.maxPlies].every(Number.isFinite)) return null;
+  if (saved.minutesPerSide <= 0 || saved.incrementSec < 0 || saved.maxPlies <= 0) return null;
+  if (!Number.isFinite(saved.clock.whiteMs) || !Number.isFinite(saved.clock.blackMs)) return null;
+  if (saved.clock.whiteMs < 0 || saved.clock.blackMs < 0) return null;
+  const battle = {
+    ...saved,
+    clock: { ...saved.clock, running: null },
+    status: "paused",
+  };
+  return { battle, sessionSnapshot };
 }

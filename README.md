@@ -2,7 +2,7 @@
 
 > Play chess with Gemini, ChatGPT, Claude, Grok, Perplexity or Copilot in Chrome's side panel.
 
-**v0.7.0** is a zero-build Manifest V3 extension. You play one colour and the AI in your **pinned** chat plays the other. The local chess rules engine validates every move (including castling, en passant, promotion, checks and draws). The extension sends a FEN-based request to that one chat and reads the AI's _new_ reply. No account, API key, backend, analytics or telemetry is required.
+**v0.8.0** is a zero-build Manifest V3 extension. You play one colour and the AI in your **pinned** chat plays the other. The local chess rules engine validates every move (including castling, en passant, promotion, checks and draws). The extension sends a FEN-based request to that one chat and reads the AI's _new_ reply. No account, API key, backend, analytics or telemetry is required.
 
 ## Features
 

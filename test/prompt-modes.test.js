@@ -94,7 +94,7 @@ test("buildTurnPrompt picks the opening prompt at ply 0 and the move prompt afte
   const opening = buildTurnPrompt({ aiColor: "w", fen: BASE.fen, plyCount: 0 });
   assert.equal(opening, buildOpeningPrompt({ aiColor: "w", fen: BASE.fen }));
   const turn = buildTurnPrompt({ ...BASE, plyCount: 1 });
-  assert.equal(turn, buildMovePrompt({ ...BASE }));
+  assert.equal(turn, buildMovePrompt({ ...BASE, plyCount: 1 }));
 });
 
 test("prompt metrics report chars/lines and flag the size budget", () => {

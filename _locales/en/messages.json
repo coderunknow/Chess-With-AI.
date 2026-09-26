@@ -1097,16 +1097,16 @@
     "message": "Concise"
   },
   "settings_styleEfficient": {
-    "message": "Efficient \u2014 move only"
+    "message": "Efficient — move only"
   },
   "settings_styleFun": {
-    "message": "Fun \u2014 with commentary"
+    "message": "Fun — with commentary"
   },
   "settings_funSentences": {
     "message": "Fun commentary (sentences)"
   },
   "settings_funSentencesHint": {
-    "message": "Fun mode adds 1\u20132 short witty sentences after the move. The move is always parsed first."
+    "message": "Fun mode adds 1–2 short witty sentences after the move. The move is always parsed first."
   },
   "battle_title": {
     "message": "AI battle (unrated)"
@@ -1205,7 +1205,7 @@
     "message": "illegal or missing replies after {count} retries. Ask again, Abort, or Export."
   },
   "battle_startCancelled": {
-    "message": "Battle not started \u2014 the current game was kept."
+    "message": "Battle not started — the current game was kept."
   },
   "battle_history": {
     "message": "Battles history"
@@ -1254,5 +1254,23 @@
   },
   "status_aiToMove": {
     "message": "{platform} is to move — nothing has been sent yet. Press Ask AI to send the position."
+  },
+  "settings_explainMode": {
+    "message": "Explain"
+  },
+  "settings_explainOff": {
+    "message": "Off"
+  },
+  "settings_explainShort": {
+    "message": "Short"
+  },
+  "settings_explainFull": {
+    "message": "Full"
+  },
+  "settings_explainHint": {
+    "message": "Show a live-only reason after the move. Never saved."
+  },
+  "explain_thinking": {
+    "message": "AI's thinking"
   }
 }

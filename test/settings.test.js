@@ -158,6 +158,12 @@ test("every new setting label exists in both locales", () => {
     "settings.styleConcise",
     "settings.styleEfficient",
     "settings.styleFun",
+    "settings.explainMode",
+    "settings.explainOff",
+    "settings.explainShort",
+    "settings.explainFull",
+    "settings.explainHint",
+    "explain.thinking",
     "settings.funSentences",
     "settings.funSentencesHint",
   ];

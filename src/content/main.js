@@ -17,6 +17,7 @@ import {
 } from "../shared/messaging.js";
 import { DEFAULT_SETTINGS, SETTINGS_KEY, normaliseSettings } from "../shared/settings.js";
 import { readValue } from "../shared/storage.js";
+import { COMMENTARY_MAX_FULL, extractCommentary } from "../shared/prompt.js";
 import {
   assistantCandidatesForHost,
   assistantSelectorsForHost,
@@ -78,8 +79,17 @@ export function startContentScript({ bridgeOptions = {}, watcherOptions = {} } =
   const deliver = (event) => {
     watcher.stop();
     diagnostics.setReply({ attribution: gate.attribution });
+    // Live-only commentary for the thinking card. Extracted after move parsing;
+    // never written to diagnostics, storage, PGN, or logs. `event.text` has
+    // already had any prompt echo stripped by the observer, so no prompt list
+    // is passed here.
+    const commentary = extractCommentary(event.text || "", {
+      move: event.move || "",
+      maxChars: COMMENTARY_MAX_FULL,
+    });
     const payload = {
       ...event,
+      commentary,
       requestId: currentRequestId,
       platform: platform?.id || "",
       diagnostics: diagnostics.report,
