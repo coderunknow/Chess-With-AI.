@@ -198,6 +198,7 @@ try {
         density: /** @type {HTMLSelectElement} */ (byIdOptional("settings-density")),
         engineLevel: /** @type {HTMLSelectElement} */ (byIdOptional("settings-engine-level")),
         promptStyle: byIdOptional("settings-prompt-style"),
+        explainMode: byIdOptional("settings-explain-mode"),
         funSentences: byIdOptional("settings-fun-sentences"),
         maxRetries: byId("settings-max-retries"),
         sendMode: byId("settings-send-mode"),

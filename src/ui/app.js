@@ -248,6 +248,7 @@ export class App {
       plyCount: session.plyCount,
       style: this.#settings.promptStyle,
       funSentences: this.#settings.funCommentarySentences,
+      explainMode: this.#settings.explainMode,
       battleClock: null, // set by the battle loop while a battle runs
       ...extra,
     };
@@ -2790,6 +2791,7 @@ export class App {
     enumSetting(settingsDialog.controls.moveListFormat, "moveListFormat");
     enumSetting(settingsDialog.controls.moveInteraction, "moveInteraction");
     enumSetting(settingsDialog.controls.promptStyle, "promptStyle");
+    enumSetting(settingsDialog.controls.explainMode, "explainMode");
     numberSetting(settingsDialog.controls.waitingReminder, "waitingReminderMs");
 
     for (const input of settingsDialog.controls.toggles) {
@@ -3681,6 +3683,7 @@ export class App {
     if (this.#refs.analysis?.level) this.#refs.analysis.level.value = String(this.#engineLevel);
     if (settingsDialog.controls.sendMode) settingsDialog.controls.sendMode.value = this.#settings.sendMode;
     if (settingsDialog.controls.promptStyle) settingsDialog.controls.promptStyle.value = this.#settings.promptStyle;
+    if (settingsDialog.controls.explainMode) settingsDialog.controls.explainMode.value = this.#settings.explainMode;
     if (settingsDialog.controls.funSentences)
       settingsDialog.controls.funSentences.value = String(this.#settings.funCommentarySentences);
     if (settingsDialog.controls.maxRetries)

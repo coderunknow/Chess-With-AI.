@@ -36,6 +36,32 @@ const BARE_MOVE_PATTERN = /\b([a-h][1-8][a-h][1-8][qrbn]?)\b/gi;
  */
 export const REPLY_VISIBILITY_LINE = "Show the move in your visible chat reply as plain text, not in a code block.";
 
+/**
+ * Extract display-only explanation from a reply. It is deliberately separate
+ * from move parsing: commentary can never affect legality or state.
+ * @param {unknown} text
+ * @param {{move?: string, prompts?: string[], maxChars?: number}} [options]
+ * @returns {string}
+ */
+export function extractCommentary(text, { move = "", prompts = [], maxChars = 160 } = {}) {
+  if (typeof text !== "string" || text.length > MAX_SCANNED_TEXT_LENGTH) return "";
+  let value = stripPromptEcho(text, prompts).text;
+  value = value.replace(/```[\s\S]*?```/g, " ");
+  value = value.replace(/\[[a-h][1-8][a-h][1-8][qrbn]?\]/gi, " ");
+  value = value.replace(/\b[a-h][1-8][a-h][1-8][qrbn]?\b/gi, " ");
+  if (move) {
+    const escapedMove = move.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    value = value.replace(new RegExp(`\\b${escapedMove}\\b`, "gi"), " ");
+  }
+  value = value.replace(/^(?:thinking|reasoning|analysis)\s*[:：-]?/i, "");
+  value = value
+    .replace(/[\*_#>`~]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value) return "";
+  return value.slice(0, Math.max(0, Number(maxChars) || 160)).trim();
+}
+
 /** Extra instruction appended when the AI answered with an illegal move. */
 export const RETRY_INSTRUCTION =
   "Your previous answer was not a legal move. Reply with exactly one legal move for the side to move, inside square brackets, for example [g8f6].";
@@ -219,6 +245,7 @@ export function buildMovePrompt({
   funSentences = DEFAULT_FUN_SENTENCES,
   battleClock = null,
   opponentIsAi = false,
+  explainMode = "off",
 }) {
   const sideName = aiColor === "w" ? "WHITE" : "BLACK";
   const humanName = aiColor === "w" ? "Black" : "White";
@@ -257,6 +284,9 @@ export function buildMovePrompt({
     );
   }
   lines.push(REPLY_VISIBILITY_LINE);
+  if (explainMode === "short" && style !== PROMPT_STYLES.EFFICIENT) {
+    lines.push("After the bracketed move, add one short reason (maximum about 20 words), with no square brackets.");
+  }
   appendContextTail(lines, { style, funSentences, battleClock, extraInstruction });
 
   return lines.join("\n");

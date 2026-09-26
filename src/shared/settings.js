@@ -45,6 +45,9 @@ export const PROMPT_STYLES = Object.freeze({
 /** Allowed prompt-style values. */
 export const PROMPT_STYLE_VALUES = Object.freeze(Object.values(PROMPT_STYLES));
 
+/** AI commentary detail shown in the live-only thinking card. */
+export const EXPLAIN_MODES = Object.freeze(["off", "short", "full"]);
+
 /** Fun-mode commentary length bounds (sentences). */
 export const FUN_SENTENCES_MIN = 1;
 export const FUN_SENTENCES_MAX = 2;
@@ -143,6 +146,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   confirmDestructive: true,
   waitingReminderMs: 0,
   promptStyle: PROMPT_STYLES.STANDARD,
+  explainMode: "short",
   funCommentarySentences: 2,
   battleMinutesPerSide: 5,
   battleIncrementSec: 0,
@@ -235,6 +239,7 @@ export function normaliseSettings(input) {
       ? Number(source.waitingReminderMs)
       : DEFAULT_SETTINGS.waitingReminderMs,
     promptStyle: asEnum(source.promptStyle, PROMPT_STYLE_VALUES, DEFAULT_SETTINGS.promptStyle),
+    explainMode: asEnum(source.explainMode, EXPLAIN_MODES, DEFAULT_SETTINGS.explainMode),
     funCommentarySentences: boundedNumberOrDefault(
       source.funCommentarySentences,
       DEFAULT_SETTINGS.funCommentarySentences,
